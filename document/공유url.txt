@@ -1,2 +1,4 @@
 <깃허브>
 https://github.com/jin25056-ai/RichClub.git
+<WBS Google Docs>
+https://docs.google.com/spreadsheets/d/1N2Mrc1Pp2kTqzOVAXIXVR5KBaBNaGT2N/edit?usp=sharing&ouid=104287895356326061249&rtpof=true&sd=true
