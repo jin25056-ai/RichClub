@@ -1,0 +1,4 @@
+<깃허브>
+https://github.com/jin25056-ai/RichClub.git
+<몽고디비>
+mongodb+srv://richclub_user:EhfJ3UfA3izccvP6@datacluster0.5v6tfgd.mongodb.net
