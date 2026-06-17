@@ -1,0 +1,91 @@
+from pymongo import MongoClient
+import requests  
+import os 
+'''
+https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo?serviceKey=GA311E%2BcoIjThrHBk%2BS%2FQv1rdezbmls5F4RMdBYZSnSpx0xj%2ByCBBuytW%2FLNQJON2NPk%2Feam%2B63aYq5WkLLzMw%3D%3D&numOfRows=100
+'''
+api_server =     'https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/' 
+service_type = 'getStockPriceInfo?'
+
+numofrow = 'numOfRows=4273970&'
+#numofrow = 'numOfRows=1&'
+result_type = 'resultType=json'
+
+from dotenv import load_dotenv
+load_dotenv()
+API_KEY    = os.getenv("API_KEY")
+MONGO_URI    = os.getenv("MONGO_URI")
+print(f"API_KEY:{API_KEY}")
+print(f"API_KEY:{MONGO_URI}")
+
+#https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo?serviceKey=GA311E%252BcoIjThrHBk%252BS%252FQv1rdezbmls5F4RMdBYZSnSpx0xj%252ByCBBuytW%252FLNQJON2NPk%252Feam%252B63aYq5WkLLzMw%253D%253D&numOfRows=20&resultType=json
+#
+API_SERVER = api_server + service_type + API_KEY + numofrow + result_type
+
+#print (API_SERVER)
+'''
+{
+'basDt': '20260616',        기준 일자
+'srtnCd': '900260',         단축코드
+'isinCd': 'HK0000295359',   isn코드
+'itmsNm': '로스웰',           종목명
+'mrktCtg': 'KOSDAQ',        시장구분
+'clpr': '1631',             종가
+'vs': '-39',                대비
+fltRt': '-2.34',            등락률
+'mkp': '1670',              시가
+'hipr': '1693',             고가
+'lopr': '1631',             저가
+'trqu': '37849',            거래량
+'trPrc': '62424805',        거래대금
+'lstgStCnt': '46029706',    상장주식수
+'mrktTotAmt': '75074450486' 시가총액
+}
+'''
+
+try:
+    response = requests.get(API_SERVER)#
+except requests.exceptions.RequestException as e:
+    print(f" 서버 연결 오류: {e}\n")
+if response.status_code == 200:
+    result = response.json()['response']['body']['items']['item']
+    dataset = []
+    #print(result)
+    '''
+            {
+            'basDt': '20260616',        기준 일자
+            'srtnCd': '900260',         단축코드
+            'isinCd': 'HK0000295359',   isn코드
+            'itmsNm': '로스웰',           종목명
+            'mrktCtg': 'KOSDAQ',        시장구분
+            'clpr': '1631',             종가
+            'vs': '-39',                대비
+            fltRt': '-2.34',            등락률
+            'mkp': '1670',              시가
+            'hipr': '1693',             고가
+            'lopr': '1631',             저가
+            'trqu': '37849',            거래량
+            'trPrc': '62424805',        거래대금
+            'lstgStCnt': '46029706',    상장주식수
+            'mrktTotAmt': '75074450486' 시가총액
+            }
+            '''
+    for data in result:
+        dataset.append({
+            'date'          : data['basDt'],
+            'name'          : data['itmsNm'],
+            'end'           : data['clpr'],
+            'vs'            : data['vs'],
+            'fltRt'         : data['fltRt'],
+            'mkp'           : data['mkp'],
+            'high'          : data['hipr'],
+            'low'           : data['lopr'],
+            'trqu'          : data['trqu'],
+            'trPrc'         : data['trPrc'],
+            'lstgStCnt'     : data['lstgStCnt'],
+            'mrktTotAmt'    : data['mrktTotAmt']
+        })
+#print(dataset)
+client = MongoClient(MONGO_URI)
+db = client['data_seongsu']['stock_data']
+#db.insert_many(dataset)
