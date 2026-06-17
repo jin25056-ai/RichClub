@@ -26,3 +26,6 @@ env/
 # os
 .DS_Store
 Thumbs.db
+
+# pkl (AI 모델)
+*.pkl
