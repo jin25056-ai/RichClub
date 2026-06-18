@@ -2,9 +2,8 @@ import os
 import pandas as pd
 from pymongo import MongoClient
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
 import joblib
-from dotenv import load_dotenv  # .env 파일 읽어오는 라이브러리
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -23,44 +22,64 @@ df = pd.DataFrame(list(collection.find()))
 df = df.sort_values(["stock_name", "Date"])
 
 # ===== 3. feature 생성 =====
-# 최근 5일 평균 가격
 df["ma5"] = df.groupby("stock_name")["close"].transform(lambda x: x.rolling(5).mean())
-# 최근 10일 평균 가격
 df["ma10"] = df.groupby("stock_name")["close"].transform(lambda x: x.rolling(10).mean())
-# 하루 수익률
+df["ma20"] = df.groupby("stock_name")["close"].transform(lambda x: x.rolling(20).mean())
+
 df["return"] = df.groupby("stock_name")["close"].pct_change()
 
+# RSI / MACD는 이미 DB에 있다고 가정
+df["macd_diff"] = df["macd"] - df["signal"]
+
 # ===== 4. target 생성 =====
-# 다음날 가격 가져오기
 df["next_close"] = df.groupby("stock_name")["close"].shift(-1)
-# 내일 가격이 오늘보다 높으면 1 아니면 0 (1 : 상승, 0 : 하락)
 df["target"] = (df["next_close"] > df["close"]).astype(int)
 
 # ===== 5. 데이터 정리 =====
 df = df.dropna()
 
-features = ["ma5", "ma10", "return"]
+# ===== 6. feature / label =====
+features = [
+    "ma5",
+    "ma10",
+    "ma20",
+    "return",
+    "rsi",
+    "macd",
+    "signal",
+    "macd_diff"
+]
+
 X = df[features]
 y = df["target"]
 
-# ===== 6. train/test =====
-X_train, X_test, y_train, y_test = train_test_split(X, y, shuffle=False)
+# ===== 7. 시간 기준 train/test split =====
+split_idx = int(len(df) * 0.8)
 
-# ===== 7. 모델 학습 =====
-model = RandomForestClassifier(n_estimators=200)
+X_train = X.iloc[:split_idx]
+X_test = X.iloc[split_idx:]
+y_train = y.iloc[:split_idx]
+y_test = y.iloc[split_idx:]
+
+# ===== 8. 모델 학습 =====
+model = RandomForestClassifier(
+    n_estimators=300,
+    max_depth=12,
+    random_state=42,
+    n_jobs=-1
+)
+
 model.fit(X_train, y_train)
 
-# ===== 8. 평가 =====
-print("accuracy:", model.score(X_test, y_test))
+# ===== 9. 평가 =====
+accuracy = model.score(X_test, y_test)
+print("accuracy:", accuracy)
 
-# ===== 9. 저장 =====
-# 저장할 디렉토리 경로 설정
+# ===== 10. 저장 =====
 save_dir = "../../model/jungho"
+os.makedirs(save_dir, exist_ok=True)
 
-# 해당 디렉토리가 없으면 자동으로 생성
-# os.makedirs(save_dir, exist_ok=True)
-
-# 모델 저장 경로 결합
-model_path = os.path.join(save_dir, "stock_model_v1.pkl")
-# 모델 저장
+model_path = os.path.join(save_dir, "stock_model_v2.pkl")
 joblib.dump(model, model_path)
+
+print("model saved:", model_path)

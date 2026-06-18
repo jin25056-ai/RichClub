@@ -95,7 +95,7 @@ for ticker in tickers:
         result = result.dropna()
 
         # 저장
-        result.to_csv(f"./data/{safe_name}.csv", encoding="utf-8-sig")
+        result.to_csv(f"./company_signals/{safe_name}.csv", encoding="utf-8-sig")
 
         print(f"{safe_name} 저장 완료")
 
