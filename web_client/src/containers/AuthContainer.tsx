@@ -6,6 +6,33 @@ import { login, signup } from '../api';
 
 type AuthMode = 'login' | 'signup';
 
+const parseErrorMessage = (err: any): string => {
+  const detail = err?.response?.data?.detail;
+
+  if (!detail) return '요청에 실패했습니다.';
+
+  // FastAPI validation error (배열 형태)
+  if (Array.isArray(detail)) {
+    const first = detail[0];
+    const msg: string = first?.msg ?? '';
+
+    if (msg.includes('email') || msg.includes('@-sign')) return '올바른 이메일 형식을 입력해주세요.';
+    if (msg.includes('min_length') || msg.includes('8')) return '비밀번호는 최소 8자 이상이어야 합니다.';
+    if (first?.loc?.includes('name')) return '이름을 입력해주세요.';
+    return '입력값을 확인해주세요.';
+  }
+
+  // 서버 문자열 에러
+  if (typeof detail === 'string') {
+    if (detail.includes('이메일')) return detail;
+    if (detail.includes('비밀번호')) return detail;
+    if (detail.includes('이미 사용')) return '이미 가입된 이메일입니다.';
+    return detail;
+  }
+
+  return '요청에 실패했습니다.';
+};
+
 const AuthContainer: React.FC = () => {
   const navigate = useNavigate();
   const [mode, setMode] = useState<AuthMode>('login');
@@ -20,6 +47,21 @@ const AuthContainer: React.FC = () => {
 
   const handleSubmit = async () => {
     setError(null);
+
+    // 클라이언트 사이드 검증
+    if (!form.email.includes('@')) {
+      setError('올바른 이메일 형식을 입력해주세요.');
+      return;
+    }
+    if (form.password.length < 8) {
+      setError('비밀번호는 최소 8자 이상이어야 합니다.');
+      return;
+    }
+    if (mode === 'signup' && !form.name?.trim()) {
+      setError('이름을 입력해주세요.');
+      return;
+    }
+
     setLoading(true);
     try {
       const res =
@@ -32,8 +74,7 @@ const AuthContainer: React.FC = () => {
       navigate('/');
       window.location.reload();
     } catch (err: any) {
-      const message = err?.response?.data?.detail ?? '요청에 실패했습니다.';
-      setError(typeof message === 'string' ? message : JSON.stringify(message));
+      setError(parseErrorMessage(err));
     } finally {
       setLoading(false);
     }
