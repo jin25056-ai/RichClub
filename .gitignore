@@ -1,3 +1,9 @@
+# web
+node_modules/*
+node_modules
+node_modules/
+
+# model
 .ipynb_checkpoints
 .vscode
 Thumbs.db
