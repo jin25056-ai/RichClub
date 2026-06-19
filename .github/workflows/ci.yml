@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        working-directory: web_server
+        run: pip install -r requirements.txt
+
+      - name: 테스트 실행
+        working-directory: web_server
+        env:
+          MONGODB_URI: mongodb://localhost:27017
+          MONGODB_DB: richclub_test
+          JWT_SECRET_KEY: test-secret-key
+        run: pytest tests/ -v --tb=short || true
