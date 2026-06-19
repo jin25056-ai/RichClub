@@ -25,15 +25,17 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     height: 'calc(100vh - 57px)',
     gap: '16px',
+    backgroundColor: '#111111',
   },
   heading: {
     fontSize: '40px',
     fontWeight: 700,
     letterSpacing: '-1px',
+    color: '#ffffff',
   },
   sub: {
     fontSize: '15px',
-    color: '#666666',
+    color: '#888888',
     marginBottom: '8px',
   },
   actions: {

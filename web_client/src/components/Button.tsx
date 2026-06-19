@@ -13,14 +13,13 @@ const Button: React.FC<ButtonProps> = ({ label, onClick, variant = 'primary' }) 
     fontWeight: 600,
     borderRadius: '6px',
     cursor: 'pointer',
-    border: '1px solid #111111',
     transition: 'opacity 0.15s',
   };
 
   const variantStyle: React.CSSProperties =
     variant === 'primary'
-      ? { backgroundColor: '#111111', color: '#ffffff' }
-      : { backgroundColor: '#ffffff', color: '#111111' };
+      ? { backgroundColor: '#ffffff', color: '#111111', border: '1px solid #ffffff' }
+      : { backgroundColor: 'transparent', color: '#888888', border: '1px solid #2a2a2a' };
 
   return (
     <button style={{ ...baseStyle, ...variantStyle }} onClick={onClick}>
