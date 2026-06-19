@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 from bson import ObjectId
@@ -5,6 +6,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.security import hash_password, verify_password
 from app.schemas.auth import UserCreate
+
+logger = logging.getLogger(__name__)
 
 
 async def find_user_by_email(db: AsyncIOMotorDatabase, email: str) -> dict | None:
@@ -20,6 +23,7 @@ async def find_user_by_id(db: AsyncIOMotorDatabase, user_id: str) -> dict | None
 
 async def create_user(db: AsyncIOMotorDatabase, data: UserCreate) -> dict:
     existing = await find_user_by_email(db, data.email)
+    logger.info("[create_user] email=%s existing=%s", data.email, existing)
     if existing:
         raise ValueError("이미 사용 중인 이메일입니다.")
 
@@ -33,6 +37,7 @@ async def create_user(db: AsyncIOMotorDatabase, data: UserCreate) -> dict:
     }
     result = await db.users.insert_one(doc)
     doc["_id"] = result.inserted_id
+    logger.info("[create_user] 생성 완료 id=%s", result.inserted_id)
     return doc
 
 

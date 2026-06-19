@@ -1,12 +1,13 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { logout } from '../api';
 
 const Header: React.FC = () => {
   const navigate = useNavigate();
   const isLoggedIn = !!localStorage.getItem('access_token');
 
   const handleLogout = () => {
-    localStorage.removeItem('access_token');
+    logout();
     navigate('/');
     window.location.reload();
   };

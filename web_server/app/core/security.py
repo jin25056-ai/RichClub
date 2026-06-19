@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
@@ -8,12 +10,21 @@ from app.core.config import settings
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+def _pre_hash(plain: str) -> str:
+    """bcrypt 72바이트 제한 우회: sha256 hex digest로 변환 후 bcrypt 적용"""
+    return hmac.new(
+        settings.jwt_secret_key.encode(),
+        plain.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def hash_password(plain: str) -> str:
-    return pwd_context.hash(plain)
+    return pwd_context.hash(_pre_hash(plain))
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return pwd_context.verify(_pre_hash(plain), hashed)
 
 
 def create_access_token(subject: str) -> str:
