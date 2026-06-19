@@ -1,3 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# 환경변수
+.env
+.env.docker
+.env.local
+
+# Node
+node_modules/
+web_client/build/
+
+# IDE
+.idea/
+.vscode/
+
+# Docker
+*.log
+
+# web
+node_modules/*
+node_modules
+node_modules/
+
+# model
+.ipynb_checkpoints
+.vscode
 Thumbs.db
 
 # pkl (AI 모델)
