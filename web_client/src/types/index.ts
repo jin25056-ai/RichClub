@@ -2,6 +2,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  created_at: string;
 }
 
 export interface AuthFormValues {
@@ -12,5 +13,7 @@ export interface AuthFormValues {
 
 export interface AuthResponse {
   access_token: string;
+  refresh_token: string;
+  token_type: string;
   user: User;
 }

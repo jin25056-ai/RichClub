@@ -12,6 +12,7 @@ const AuthContainer: React.FC = () => {
   const [form, setForm] = useState<AuthFormValues>({ email: '', password: '', name: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -21,16 +22,18 @@ const AuthContainer: React.FC = () => {
     setError(null);
     setLoading(true);
     try {
-      if (mode === 'login') {
-        const res = await login({ email: form.email, password: form.password });
-        localStorage.setItem('access_token', res.access_token);
-      } else {
-        const res = await signup(form);
-        localStorage.setItem('access_token', res.access_token);
-      }
+      const res =
+        mode === 'login'
+          ? await login({ email: form.email, password: form.password })
+          : await signup(form);
+
+      localStorage.setItem('access_token', res.access_token);
+      localStorage.setItem('refresh_token', res.refresh_token);
       navigate('/');
+      window.location.reload();
     } catch (err: any) {
-      setError(err?.response?.data?.message ?? '요청에 실패했습니다.');
+      const message = err?.response?.data?.detail ?? '요청에 실패했습니다.';
+      setError(typeof message === 'string' ? message : JSON.stringify(message));
     } finally {
       setLoading(false);
     }
@@ -73,14 +76,23 @@ const AuthContainer: React.FC = () => {
             value={form.email}
             onChange={handleChange}
           />
-          <input
-            style={styles.input}
-            type="password"
-            name="password"
-            placeholder="비밀번호"
-            value={form.password}
-            onChange={handleChange}
-          />
+          <div style={styles.passwordWrapper}>
+            <input
+              style={styles.passwordInput}
+              type={showPassword ? 'text' : 'password'}
+              name="password"
+              placeholder="비밀번호 (최소 8자)"
+              value={form.password}
+              onChange={handleChange}
+            />
+            <button
+              style={styles.eyeButton}
+              onClick={() => setShowPassword((prev) => !prev)}
+              tabIndex={-1}
+            >
+              {showPassword ? '숨기기' : '보기'}
+            </button>
+          </div>
           {error && <p style={styles.error}>{error}</p>}
           <Button
             label={loading ? '처리 중...' : mode === 'login' ? '로그인' : '회원가입'}
@@ -116,7 +128,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   tabRow: {
     display: 'flex',
-    gap: '0',
     backgroundColor: '#222222',
     borderRadius: '8px',
     padding: '4px',
@@ -159,6 +170,31 @@ const styles: Record<string, React.CSSProperties> = {
     width: '100%',
     backgroundColor: '#222222',
     color: '#f0f0f0',
+  },
+  passwordWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  passwordInput: {
+    padding: '10px 60px 10px 14px',
+    fontSize: '14px',
+    border: '1px solid #2a2a2a',
+    borderRadius: '6px',
+    outline: 'none',
+    width: '100%',
+    backgroundColor: '#222222',
+    color: '#f0f0f0',
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: '12px',
+    background: 'none',
+    border: 'none',
+    color: '#666666',
+    fontSize: '12px',
+    cursor: 'pointer',
+    padding: '0',
   },
   error: {
     fontSize: '13px',
