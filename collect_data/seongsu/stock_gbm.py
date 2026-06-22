@@ -7,12 +7,12 @@ from sklearn.metrics import (
     confusion_matrix
 )
 
-
+import os
 from xgboost import XGBClassifier
 from pymongo import MongoClient
 import pandas as pd
 
-MONGO_URI = "mongodb+srv://richclub_user:wBzJQpD2lcz1vMBE@datacluster0.5v6tfgd.mongodb.net/"
+MONGO_URI  = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
 db = client['data_hyerim']
 collection = db['investor_trend']
