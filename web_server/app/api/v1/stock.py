@@ -3,6 +3,7 @@
 - AI 예측 목록 (매수/매도/관망 태그)
 - RSI 차트 데이터
 - MACD 차트 데이터
+- 5분봉 차트 데이터
 - 종목 리스트 / 검색
 - AI 분석 상세 (매수 근거)
 """
@@ -11,6 +12,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pydantic import BaseModel
 
 from app.core.dependencies import get_current_user
 from app.db.mongo import get_db
@@ -28,21 +30,36 @@ router = APIRouter(prefix="/stock", tags=["stock"])
 SIGNAL_MAP = {0: "매도", 1: "매수", 2: "관망"}
 PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
 
-# 매수 신호 판단에 사용되는 조건 설명
 CONDITION_LABELS = {
-    "cond_yang_bong":          "양봉 (종가 > 시가)",
-    "cond_ma5_20_gc":          "5일선/20일선 골든크로스",
-    "cond_ma60_filter":        "60일선 위 또는 상향 돌파",
-    "cond_macd_total":         "MACD 정배열 및 상승 중",
-    "cond_stoch_pure":         "스토캐스틱 K선 > D선",
-    "cond_obv_rising":         "OBV 상승 (거래량 수반)",
-    "cond_sp500_bear_market":  "S&P500 하락장 아님",
-    "watch_signal":            "관망 4대 요건 충족",
+    "cond_yang_bong":         "양봉 (종가 > 시가)",
+    "cond_ma5_20_gc":         "5일선/20일선 골든크로스",
+    "cond_ma60_filter":       "60일선 위 또는 상향 돌파",
+    "cond_macd_total":        "MACD 정배열 및 상승 중",
+    "cond_stoch_pure":        "스토캐스틱 K선 > D선",
+    "cond_obv_rising":        "OBV 상승 (거래량 수반)",
+    "cond_sp500_bear_market": "S&P500 하락장 아님",
+    "watch_signal":           "관망 4대 요건 충족",
 }
 
 
 def _db() -> AsyncIOMotorDatabase:
     return get_db()
+
+
+# ── 5분봉 스키마 ───────────────────────────────────────────────────────────────
+class CandleDataPoint(BaseModel):
+    datetime: str
+    open: Optional[float]
+    high: Optional[float]
+    low: Optional[float]
+    close: Optional[float]
+    volume: Optional[float]
+
+
+class CandleResponse(BaseModel):
+    stock_code: str
+    interval: str
+    data: List[CandleDataPoint]
 
 
 # ── 종목 리스트 ────────────────────────────────────────────────────────────────
@@ -51,7 +68,6 @@ async def get_stock_list(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """MongoDB stock_ohlcv 컬렉션에서 종목 코드/이름 목록 반환"""
     cursor = db.stock_ohlcv.aggregate([
         {"$group": {"_id": "$stock_code", "stock_name": {"$first": "$stock_name"}}},
         {"$sort": {"_id": 1}},
@@ -69,7 +85,6 @@ async def search_stock(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """종목코드 또는 종목명으로 검색"""
     cursor = db.stock_ohlcv.aggregate([
         {
             "$match": {
@@ -97,21 +112,15 @@ async def get_ai_predictions(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """
-    AI 모델이 예측한 매수/매도/관망 목록.
-    total_trading_signals 컬렉션에서 최신 예측 결과를 반환.
-    """
     query: dict = {}
     if signal in ("매수", "매도", "관망"):
         query["signal"] = signal
 
     cursor = db.total_trading_signals.find(query).sort("predicted_at", -1).limit(limit)
-
     result = []
     async for doc in cursor:
         signal_str = doc.get("signal", "관망")
         signal_label = {v: k for k, v in SIGNAL_MAP.items()}.get(signal_str, 2)
-
         result.append(AIPredictionItem(
             stock_code=doc.get("stock_code", ""),
             stock_name=doc.get("stock_name", ""),
@@ -131,10 +140,6 @@ async def get_ai_detail(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """
-    특정 종목의 AI 예측 근거 상세.
-    어떤 조건이 충족됐는지, 피처 중요도 등을 반환.
-    """
     doc = await db.total_trading_signals.find_one(
         {"stock_code": stock_code},
         sort=[("predicted_at", -1)]
@@ -142,10 +147,8 @@ async def get_ai_detail(
     if not doc:
         raise HTTPException(status_code=404, detail="해당 종목의 AI 예측 결과가 없습니다.")
 
-    # 피처 중요도 (저장돼 있으면 사용, 없으면 기술적 지표 값으로 대체)
     feature_importance = doc.get("feature_importance", [])
     if not feature_importance:
-        # 기술적 지표 값을 피처 중요도 형태로 구성
         fi_fields = ["macd", "stoch_k", "stoch_d", "obv", "ma5_20_ratio",
                      "ma20_60_ratio", "close_ma60_ratio", "vix_value"]
         for f in fi_fields:
@@ -156,18 +159,14 @@ async def get_ai_detail(
                     "direction": "positive" if doc.get(f, 0) > 0 else "negative"
                 })
 
-    # 충족/미충족 조건
-    conditions_met = doc.get("conditions_met", [])
-    conditions_not_met = doc.get("conditions_not_met", [])
-
     return AIDetailResponse(
         stock_code=stock_code,
         stock_name=doc.get("stock_name", ""),
         signal=doc.get("signal", "관망"),
         confidence=doc.get("confidence"),
         feature_importance=feature_importance,
-        conditions_met=conditions_met,
-        conditions_not_met=conditions_not_met,
+        conditions_met=doc.get("conditions_met", []),
+        conditions_not_met=doc.get("conditions_not_met", []),
         predicted_at=doc.get("predicted_at"),
     )
 
@@ -180,15 +179,10 @@ async def get_rsi(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """
-    종목별 RSI 데이터 반환.
-    stock_ohlcv 컬렉션에서 종가를 가져와 RSI 계산 후 반환.
-    """
     if period not in PERIOD_DAYS:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m 중 하나여야 합니다.")
 
     days = PERIOD_DAYS[period]
-    # RSI 계산을 위해 period + 14일(RSI window) 추가로 조회
     since = datetime.utcnow() - timedelta(days=days + 20)
 
     cursor = db.stock_ohlcv.find(
@@ -203,19 +197,13 @@ async def get_rsi(
     stock_name = docs[0].get("stock_name", "")
     closes = [float(d["close"]) for d in docs]
     dates = [d["date"].strftime("%Y-%m-%d") if hasattr(d["date"], "strftime") else str(d["date"]) for d in docs]
-
-    # RSI 계산 (14일)
     rsi_values = _calc_rsi(closes, window=14)
 
-    # period에 해당하는 구간만 반환
     cutoff = datetime.utcnow() - timedelta(days=days)
     data = []
     for i, d in enumerate(docs):
-        dt = d["date"] if hasattr(d["date"], "date") else d["date"]
-        if hasattr(dt, "replace"):
-            dt_naive = dt.replace(tzinfo=None)
-        else:
-            dt_naive = dt
+        dt = d["date"]
+        dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
         if dt_naive >= cutoff and rsi_values[i] is not None:
             data.append(RSIDataPoint(date=dates[i], rsi=round(rsi_values[i], 2)))
 
@@ -230,14 +218,11 @@ async def get_macd(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """
-    종목별 MACD + 시그널 + 히스토그램 데이터 반환.
-    """
     if period not in PERIOD_DAYS:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m 중 하나여야 합니다.")
 
     days = PERIOD_DAYS[period]
-    since = datetime.utcnow() - timedelta(days=days + 40)  # EMA26 계산 여유분
+    since = datetime.utcnow() - timedelta(days=days + 40)
 
     cursor = db.stock_ohlcv.find(
         {"stock_code": stock_code, "date": {"$gte": since}},
@@ -251,17 +236,13 @@ async def get_macd(
     stock_name = docs[0].get("stock_name", "")
     closes = [float(d["close"]) for d in docs]
     dates = [d["date"].strftime("%Y-%m-%d") if hasattr(d["date"], "strftime") else str(d["date"]) for d in docs]
-
     macd_line, signal_line, histogram = _calc_macd(closes)
 
     cutoff = datetime.utcnow() - timedelta(days=days)
     data = []
     for i, d in enumerate(docs):
         dt = d["date"]
-        if hasattr(dt, "replace"):
-            dt_naive = dt.replace(tzinfo=None)
-        else:
-            dt_naive = dt
+        dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
         if dt_naive >= cutoff and macd_line[i] is not None:
             data.append(MACDDataPoint(
                 date=dates[i],
@@ -273,9 +254,47 @@ async def get_macd(
     return MACDResponse(stock_code=stock_code, stock_name=stock_name, period=period, data=data)
 
 
+# ── 5분봉 차트 ─────────────────────────────────────────────────────────────────
+@router.get("/chart/candle/{stock_code}", response_model=CandleResponse, summary="5분봉 차트 데이터")
+async def get_candles(
+    stock_code: str,
+    days: int = Query(1, ge=1, le=30, description="조회 일수 (최대 30일)"),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """
+    종목별 5분봉 데이터 반환
+    candles_5m 컬렉션에서 조회 (스케줄러가 장 중 5분마다 누적 수집)
+    """
+    since = datetime.utcnow() - timedelta(days=days)
+
+    cursor = db.candles_5m.find(
+        {"stock_code": stock_code, "datetime": {"$gte": since}},
+        {"_id": 0, "datetime": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+    ).sort("datetime", 1)
+
+    docs = [doc async for doc in cursor]
+    if not docs:
+        raise HTTPException(status_code=404, detail="5분봉 데이터가 없습니다. 장 중에 수집됩니다.")
+
+    data = []
+    for d in docs:
+        dt = d["datetime"]
+        dt_str = dt.strftime("%Y-%m-%d %H:%M") if hasattr(dt, "strftime") else str(dt)
+        data.append(CandleDataPoint(
+            datetime=dt_str,
+            open=d.get("open"),
+            high=d.get("high"),
+            low=d.get("low"),
+            close=d.get("close"),
+            volume=d.get("volume"),
+        ))
+
+    return CandleResponse(stock_code=stock_code, interval="5m", data=data)
+
+
 # ── 내부 계산 함수 ─────────────────────────────────────────────────────────────
 def _calc_rsi(closes: list, window: int = 14) -> list:
-    """RSI 계산"""
     rsi = [None] * len(closes)
     if len(closes) < window + 1:
         return rsi
@@ -293,7 +312,6 @@ def _calc_rsi(closes: list, window: int = 14) -> list:
         if i > window:
             avg_gain = (avg_gain * (window - 1) + gains[i - 1]) / window
             avg_loss = (avg_loss * (window - 1) + losses[i - 1]) / window
-
         rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
         rsi[i] = 100 - (100 / (1 + rs))
 
@@ -301,31 +319,16 @@ def _calc_rsi(closes: list, window: int = 14) -> list:
 
 
 def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
-    """MACD, 시그널, 히스토그램 계산"""
     def ema(data, span):
         result = [None] * len(data)
         k = 2 / (span + 1)
         for i, v in enumerate(data):
-            if i == 0:
-                result[i] = v
-            else:
-                result[i] = v * k + result[i - 1] * (1 - k)
+            result[i] = v if i == 0 else v * k + result[i - 1] * (1 - k)
         return result
 
     ema_fast = ema(closes, fast)
     ema_slow = ema(closes, slow)
-
-    macd_line = [
-        (f - s) if f is not None and s is not None else None
-        for f, s in zip(ema_fast, ema_slow)
-    ]
-
-    valid_macd = [v if v is not None else 0 for v in macd_line]
-    signal_line = ema(valid_macd, signal)
-
-    histogram = [
-        (m - s) if m is not None else None
-        for m, s in zip(macd_line, signal_line)
-    ]
-
+    macd_line = [(f - s) if f is not None and s is not None else None for f, s in zip(ema_fast, ema_slow)]
+    signal_line = ema([v if v is not None else 0 for v in macd_line], signal)
+    histogram = [(m - s) if m is not None else None for m, s in zip(macd_line, signal_line)]
     return macd_line, signal_line, histogram
