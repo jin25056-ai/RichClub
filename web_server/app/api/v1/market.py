@@ -1,9 +1,12 @@
 """
 글로벌 시장 현황 + 승률 테스트 API
+- Yahoo Finance 429 방지: 서버 메모리 캐시 10분
 """
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
+from collections import defaultdict
 
 import httpx
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -57,7 +60,9 @@ class WinRateResponse(BaseModel):
     updated_at: datetime
 
 
-# ── 글로벌 시장 현황 ───────────────────────────────────────────────────────────
+# ── 캐시 (10분) ────────────────────────────────────────────────────────────────
+_cache: dict = {"data": None, "ts": 0}
+CACHE_TTL = 600
 
 GLOBAL_SYMBOLS = [
     {"symbol": "^IXIC",    "name": "나스닥"},
@@ -70,18 +75,23 @@ GLOBAL_SYMBOLS = [
 ]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://finance.yahoo.com",
 }
 
 
 async def _fetch_symbol(client: httpx.AsyncClient, symbol: str) -> dict:
-    """Yahoo Finance v8 API로 단일 심볼 조회"""
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-    params = {"interval": "1d", "range": "2d"}
+    url = f"https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
+    params = {"interval": "1d", "range": "5d"}
     try:
-        res = await client.get(url, params=params, headers=HEADERS, timeout=10)
+        res = await client.get(url, params=params, headers=HEADERS, timeout=15)
+        if res.status_code == 429:
+            url2 = url.replace("query2", "query1")
+            res = await client.get(url2, params=params, headers=HEADERS, timeout=15)
+        if res.status_code != 200:
+            return {"price": None, "change_pct": None}
         data = res.json()
         closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
         closes = [c for c in closes if c is not None]
@@ -102,11 +112,7 @@ async def _fetch_symbol(client: httpx.AsyncClient, symbol: str) -> dict:
 def _get_trend(change_pct: Optional[float]) -> str:
     if change_pct is None:
         return "flat"
-    if change_pct >= 0.3:
-        return "up"
-    if change_pct <= -0.3:
-        return "down"
-    return "flat"
+    return "up" if change_pct >= 0.3 else "down" if change_pct <= -0.3 else "flat"
 
 
 def _calc_invest_signal(items: List[GlobalMarketItem]) -> tuple:
@@ -158,27 +164,22 @@ def _calc_invest_signal(items: List[GlobalMarketItem]) -> tuple:
     return signal, reason
 
 
-@router.get("/global", response_model=GlobalMarketResponse, summary="글로벌 시장 현황")
-async def get_global_market(
-    _: dict = Depends(get_current_user),
-):
-    async with httpx.AsyncClient() as client:
-        tasks = [_fetch_symbol(client, s["symbol"]) for s in GLOBAL_SYMBOLS]
-        results = await asyncio.gather(*tasks)
-
+async def _fetch_all_symbols() -> GlobalMarketResponse:
     items = []
-    for info, result in zip(GLOBAL_SYMBOLS, results):
-        change_pct = result.get("change_pct")
-        items.append(GlobalMarketItem(
-            symbol=info["symbol"],
-            name=info["name"],
-            price=result.get("price"),
-            change_pct=change_pct,
-            trend=_get_trend(change_pct),
-        ))
+    async with httpx.AsyncClient() as client:
+        for info in GLOBAL_SYMBOLS:
+            result = await _fetch_symbol(client, info["symbol"])
+            change_pct = result.get("change_pct")
+            items.append(GlobalMarketItem(
+                symbol=info["symbol"],
+                name=info["name"],
+                price=result.get("price"),
+                change_pct=change_pct,
+                trend=_get_trend(change_pct),
+            ))
+            await asyncio.sleep(0.5)
 
     invest_signal, invest_reason = _calc_invest_signal(items)
-
     return GlobalMarketResponse(
         updated_at=datetime.now(timezone.utc),
         items=items,
@@ -187,9 +188,31 @@ async def get_global_market(
     )
 
 
+@router.get("/global", response_model=GlobalMarketResponse, summary="글로벌 시장 현황")
+async def get_global_market(
+    _: dict = Depends(get_current_user),
+):
+    now = time.time()
+    if _cache["data"] is not None and (now - _cache["ts"]) < CACHE_TTL:
+        return _cache["data"]
+    data = await _fetch_all_symbols()
+    _cache["data"] = data
+    _cache["ts"] = now
+    return data
+
+
 # ── 승률 테스트 ────────────────────────────────────────────────────────────────
 
 PERIOD_DAYS_MAP = {"1m": 30, "3m": 90, "6m": 180, "all": 99999}
+
+
+def _to_date(dt) -> datetime:
+    """datetime을 날짜 기준 UTC로 정규화"""
+    if dt is None:
+        return datetime.now(timezone.utc)
+    if hasattr(dt, 'replace'):
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+    return dt
 
 
 @router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트")
@@ -218,16 +241,16 @@ async def get_win_rate(
 
     stock_name = docs[0].get("stock_name") if docs else None
 
-    from collections import defaultdict
-    price_map = defaultdict(list)
+    # 종목별 날짜-가격 맵
+    price_map: dict = defaultdict(list)
     for doc in docs:
         sc = doc.get("stock_code", "")
         dt = doc.get("predicted_at")
         close = doc.get("close")
         if sc and dt and close:
-            price_map[sc].append((dt, float(close)))
+            price_map[sc].append((_to_date(dt), float(close)))
 
-    signal_returns = {"매수": [], "매도": [], "관망": []}
+    signal_returns: dict = {"매수": [], "매도": [], "관망": []}
 
     for doc in docs:
         sc = doc.get("stock_code", "")
@@ -238,15 +261,20 @@ async def get_win_rate(
         if not (sc and dt and close and signal in signal_returns):
             continue
 
-        prices = price_map[sc]
+        dt_normalized = _to_date(dt)
+        target_days = timedelta(days=hold_days)
+
+        # 같은 종목에서 hold_days 후 가격 찾기 (±2일 허용)
         future_prices = [
-            p_close for p_dt, p_close in prices
-            if timedelta(days=hold_days - 1) <= (p_dt - dt) <= timedelta(days=hold_days + 2)
+            p_close for p_dt, p_close in price_map[sc]
+            if timedelta(days=hold_days - 1) <= (p_dt - dt_normalized) <= timedelta(days=hold_days + 2)
         ]
 
         if future_prices:
             ret_pct = (future_prices[0] - float(close)) / float(close) * 100
-            signal_returns[signal].append(round(ret_pct, 2))
+            # 비정상 수익률 필터 (-50% ~ +100% 범위 외 제외)
+            if -50 <= ret_pct <= 100:
+                signal_returns[signal].append(round(ret_pct, 2))
 
     results = []
     for signal, returns in signal_returns.items():
