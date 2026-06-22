@@ -285,19 +285,31 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           };
         }).filter((d) => d.datetime >= cutStr);
 
-        // futurePadding 제거 - finalData에서 처리
+        // 미래 선행스팬 패딩 (일목균형표용, 영업일 26일)
+        const lastDate = trimmed.length ? trimmed[trimmed.length - 1].datetime : '';
+        const futureDates: string[] = [];
+        const tempD = new Date(lastDate);
+        while (futureDates.length < 26) {
+          tempD.setDate(tempD.getDate() + 1);
+          const day = tempD.getDay();
+          if (day !== 0 && day !== 6) futureDates.push(tempD.toISOString().slice(0, 10));
+        }
+        const futurePadding = futureDates.map((futureDate, i) => {
+          const srcIdx = sorted.length - 26 + i;
+          const ichi = srcIdx >= 0 ? ichimokuRaw[srcIdx] : null;
+          return { datetime: futureDate, spanA: ichi?.spanA ?? null, spanB: ichi?.spanB ?? null };
+        });
 
         // AI 신호를 chartData에 직접 합치기
         const sigMap: Record<string, string> = {};
-        (predRes.data || []).forEach((d: any) => {
-          const date = (d.predicted_at || '').slice(0, 10);
-          if (date >= cutStr) sigMap[date] = d.signal;
+        (predRes.data || []).forEach((pd: any) => {
+          const date = (pd.predicted_at || '').slice(0, 10);
+          if (date >= cutStr) sigMap[date] = pd.signal;
         });
 
-        // 미래 패딩 제거 - 선행스팬은 데이터 마지막 날까지만 표시
-        const finalData = [...trimmed].map((d) => ({
-          ...d,
-          aiSignal: sigMap[d.datetime] ?? null,
+        const finalData = [...trimmed, ...futurePadding].map((row) => ({
+          ...row,
+          aiSignal: sigMap[row.datetime] ?? null,
         }));
 
         setChartData(finalData);
