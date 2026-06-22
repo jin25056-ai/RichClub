@@ -5,6 +5,7 @@ pipeline {
         IMAGE_NAME = "efforthye/richclub-api"
         CONTAINER_NAME = "richclub-api"
         APP_PORT = "8000"
+        ENV_FILE = "/Users/nadeko/Desktop/programs/study/RichClub/web_server/.env"
     }
 
     stages {
@@ -44,7 +45,7 @@ pipeline {
                         --name ${CONTAINER_NAME} \\
                         --restart unless-stopped \\
                         -p ${APP_PORT}:8000 \\
-                        --env-file ./web_server/.env \\
+                        --env-file ${ENV_FILE} \\
                         ${IMAGE_NAME}:latest
                 """
             }
