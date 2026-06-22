@@ -108,7 +108,7 @@ def calc_signal(df: pd.DataFrame) -> pd.Series:
     signal[buy_mask]  = '매수'
     return signal
 
-def process_ticker(ticker: str, name: str, from_date: str, to_date: str, col) -> int:
+def process_ticker(ticker: str, name: str, code: str, from_date: str, to_date: str, col) -> int:
     """종목 하나 처리 → upsert 건수 반환"""
     # 지표 계산용 버퍼 90일 추가
     buf_start = (datetime.strptime(from_date, '%Y-%m-%d') - timedelta(days=90)).strftime('%Y-%m-%d')
@@ -161,7 +161,7 @@ def process_ticker(ticker: str, name: str, from_date: str, to_date: str, col) ->
         sig_label = {'매도': 0, '매수': 1, '관망': 2}.get(sig, 2)
 
         doc = {
-            'stock_code': name,
+            'stock_code': code,
             'stock_name': name,
             'close':  _safe(row.get('close')),
             'open':   _safe(row.get('open')),
@@ -215,7 +215,8 @@ def run(from_date: str, to_date: str):
     for i, row in df_list.iterrows():
         ticker = row['티커']
         name   = row['종목명']
-        cnt = process_ticker(ticker, name, from_date, to_date, col)
+        code   = str(row['종목코드']).zfill(6)
+        cnt = process_ticker(ticker, name, code, from_date, to_date, col)
         total += cnt
         if (i + 1) % 20 == 0 or (i + 1) == n:
             logger.info(f"진행 {i+1}/{n} | 누적 upsert {total}건")

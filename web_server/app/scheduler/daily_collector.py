@@ -81,13 +81,13 @@ def _load_kospi_list():
         df = pd.read_excel(KOSPI_LIST)
         df['종목코드'] = df['종목코드'].astype(str).str.zfill(6)
         df['티커'] = df['종목코드'] + '.KS'
-        return df[['티커', '종목명']].to_dict('records')
+        return df[['티커', '종목명', '종목코드']].to_dict('records')
     except Exception as e:
         logger.error(f"종목 목록 로드 실패: {e}")
         return []
 
 
-def _process_ticker_sync(ticker: str, name: str, from_date: str, to_date: str) -> list:
+def _process_ticker_sync(ticker: str, name: str, code: str, from_date: str, to_date: str) -> list:
     """동기 처리: yfinance 수집 + 지표 계산 → doc 리스트 반환"""
     buf_start = (datetime.strptime(from_date, '%Y-%m-%d') - timedelta(days=90)).strftime('%Y-%m-%d')
     end_dt = (datetime.strptime(to_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
@@ -125,7 +125,7 @@ def _process_ticker_sync(ticker: str, name: str, from_date: str, to_date: str) -
         predicted_at = datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
         sig = signal.get(dt, '관망')
         docs.append({
-            'stock_code': name,
+            'stock_code': code,
             'stock_name': name,
             'close':  _safe(row.get('close')),
             'open':   _safe(row.get('open')),
@@ -169,7 +169,7 @@ async def collect_daily_signals(db: AsyncIOMotorDatabase, target_date: str = Non
 
     total = 0
     for i, s in enumerate(stocks):
-        docs = _process_ticker_sync(s['티커'], s['종목명'], today, today)
+        docs = _process_ticker_sync(s['티커'], s['종목명'], s['종목코드'], today, today)
         for doc in docs:
             result = await col.update_one(
                 {'stock_name': doc['stock_name'], 'predicted_at': doc['predicted_at']},
