@@ -51,11 +51,16 @@ const calcIchimoku = (data: any[]) => {
   }));
 };
 
+const SIGNAL_BADGE: Record<string, { label: string; color: string; bg: string }> = {
+  매수: { label: 'BUY', color: '#fff', bg: '#16a34a' },
+  매도: { label: 'SELL', color: '#fff', bg: '#dc2626' },
+};
+
 const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) => {
   const { x, y, width, height, payload } = props;
   if (!payload || payload.open == null || payload.close == null) return null;
   if (y == null || height == null || !width || height === 0) return null;
-  const { open, high, low, close } = payload;
+  const { open, high, low, close, aiSignal } = payload;
   const isUp = close >= open;
   const color = isUp ? '#16a34a' : '#dc2626';
   const domainMinPixel = y + height;
@@ -67,11 +72,28 @@ const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) =
   const bodyTop = Math.min(openY, closeY);
   const bodyH = Math.max(Math.abs(openY - closeY), 1);
   const bw = Math.max(width - 2, 2); const cx = x + width / 2;
+
+  const badge = aiSignal && SIGNAL_BADGE[aiSignal] ? SIGNAL_BADGE[aiSignal] : null;
+
   return (
     <g>
       <line x1={cx} y1={highY} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1.5} />
       <line x1={cx} y1={bodyTop + bodyH} x2={cx} y2={lowY} stroke={color} strokeWidth={1.5} />
       <rect x={cx - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={color} stroke={color} strokeWidth={1} />
+      {badge && aiSignal === '매도' && (
+        // SELL: 고가 위에 표시
+        <g>
+          <rect x={cx - 12} y={highY - 13} width={24} height={10} rx={2} fill={badge.bg} />
+          <text x={cx} y={highY - 6} textAnchor="middle" fontSize={7} fontWeight="700" fill={badge.color}>{badge.label}</text>
+        </g>
+      )}
+      {badge && aiSignal === '매수' && (
+        // BUY: 저가 아래에 표시
+        <g>
+          <rect x={cx - 12} y={lowY + 3} width={24} height={10} rx={2} fill={badge.bg} />
+          <text x={cx} y={lowY + 11} textAnchor="middle" fontSize={7} fontWeight="700" fill={badge.color}>{badge.label}</text>
+        </g>
+      )}
     </g>
   );
 };
@@ -273,12 +295,17 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
 
         setChartData([...trimmed, ...futurePadding]);
 
-        // AI 신호 시점 저장
-        const sigList = (predRes.data || []).map((d: any) => ({
-          date: (d.predicted_at || '').slice(0, 10),
-          signal: d.signal,
-        })).filter((d: any) => d.date >= cutStr);
-        setSignals(sigList);
+        // AI 신호를 chartData에 직접 합치기
+        const sigMap: Record<string, string> = {};
+        (predRes.data || []).forEach((d: any) => {
+          const date = (d.predicted_at || '').slice(0, 10);
+          if (date >= cutStr) sigMap[date] = d.signal;
+        });
+        setChartData((prev) => prev.map((d) => ({
+          ...d,
+          aiSignal: sigMap[d.datetime] ?? null,
+        })));
+        setSignals([]);
       })
       .catch(() => setError('데이터를 불러오지 못했습니다.'))
       .finally(() => setLoading(false));
@@ -367,16 +394,6 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
               <Line type="monotone" dataKey="ma60" stroke="#a78bfa" dot={false} strokeWidth={1.5} connectNulls legendType="none" />
               <Line type="monotone" dataKey="ma20" stroke="#fb923c" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
               <Line type="monotone" dataKey="ma5" stroke="#facc15" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
-              {/* AI 신호 시점 세로선 */}
-              {signals.filter((s) => s.signal === '매수').map((s) => (
-                <ReferenceLine key={'buy-' + s.date} x={s.date} stroke="#16a34a" strokeOpacity={0.6} strokeWidth={1.5} strokeDasharray="3 2" />
-              ))}
-              {signals.filter((s) => s.signal === '매도').map((s) => (
-                <ReferenceLine key={'sell-' + s.date} x={s.date} stroke="#dc2626" strokeOpacity={0.6} strokeWidth={1.5} strokeDasharray="3 2" />
-              ))}
-              {signals.filter((s) => s.signal === '관망').map((s) => (
-                <ReferenceLine key={'hold-' + s.date} x={s.date} stroke="#d97706" strokeOpacity={0.3} strokeWidth={1} strokeDasharray="2 3" />
-              ))}
             </ComposedChart>
           </ResponsiveContainer>
 
