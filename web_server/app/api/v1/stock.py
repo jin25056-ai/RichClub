@@ -79,13 +79,16 @@ async def search_stock(
 @router.get("/ai/predictions", response_model=List[AIPredictionItem], summary="AI 예측 목록")
 async def get_ai_predictions(
     signal: Optional[str] = Query(None),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
+    stock_name: Optional[str] = Query(None),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
     query: dict = {}
     if signal in ("매수", "매도", "관망"):
         query["signal"] = signal
+    if stock_name:
+        query["stock_name"] = stock_name
     cursor = db.total_trading_signals.find(query).sort("predicted_at", -1).limit(limit)
     result = []
     async for doc in cursor:
