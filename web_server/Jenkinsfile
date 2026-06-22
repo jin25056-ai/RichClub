@@ -6,6 +6,7 @@ pipeline {
         CONTAINER_NAME = "richclub-api"
         APP_PORT = "8000"
         ENV_FILE = "/var/jenkins_home/.env"
+        HOST_IP = "192.168.219.100"
     }
 
     stages {
@@ -54,7 +55,7 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh "sleep 5"
-                sh "curl -f http://localhost:${APP_PORT}/health || exit 1"
+                sh "curl -f http://${HOST_IP}:${APP_PORT}/health || exit 1"
             }
         }
     }
