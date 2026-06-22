@@ -38,19 +38,37 @@ def load_csv(csv_path: str) -> pd.DataFrame:
     return df
 
 
+KOSPI_LIST = os.path.join(os.path.dirname(__file__), 'kospi_list.xlsx')
+
+def _load_code_map() -> dict:
+    """종목명 → 종목코드 매핑 (kospi_list.xlsx)"""
+    try:
+        df = pd.read_excel(KOSPI_LIST)
+        df['종목코드'] = df['종목코드'].astype(str).str.zfill(6)
+        return dict(zip(df['종목명'], df['종목코드']))
+    except Exception as e:
+        logger.warning(f"kospi_list.xlsx 로드 실패: {e}")
+        return {}
+
+
 def preprocess(df: pd.DataFrame) -> list:
     docs = []
     col_map = {'날짜': 'date', '종목명': 'stock_name', '종가': 'close', '시그널': 'signal'}
     df = df.rename(columns=col_map)
+    code_map = _load_code_map()
 
     for _, row in df.iterrows():
         signal_str = str(row.get('signal', '관망')).strip()
         signal_label = SIGNAL_TO_INT.get(signal_str, 2)
-        stock_code = str(row.get('stock_code', row.get('종목코드', row.get('stock_name', '')))).strip()
+        stock_name = str(row.get('stock_name', '')).strip()
+        # 종목코드: CSV에 있으면 사용, 없으면 xlsx 매핑, 그것도 없으면 종목명
+        stock_code = str(row.get('stock_code', row.get('종목코드', ''))).strip()
+        if not stock_code or stock_code == 'nan':
+            stock_code = code_map.get(stock_name, stock_name)
 
         doc = {
             'stock_code': stock_code,
-            'stock_name': str(row.get('stock_name', '')).strip(),
+            'stock_name': stock_name,
             'close': _safe_float(row.get('close')),
             'signal': signal_str,
             'signal_label': signal_label,
