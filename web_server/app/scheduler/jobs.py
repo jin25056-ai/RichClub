@@ -7,6 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.db.mongo import get_db
 from app.scheduler.candle_collector import collect_5min_candles
+from app.scheduler.daily_collector import collect_daily_signals
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
@@ -69,6 +70,12 @@ async def run_drift_check() -> None:
     })
 
 
+async def run_daily_collect() -> None:
+    """매일 장 마감 후 오늘 날짜 신호 수집 (월~금 16:30 KST)"""
+    db = get_db()
+    await collect_daily_signals(db)
+
+
 def start_scheduler() -> None:
     # 시장 데이터 수집 (매일 오전 9시, 오후 3시)
     scheduler.add_job(
@@ -88,6 +95,17 @@ def start_scheduler() -> None:
         hour="9-15",
         minute="*/5",
         id="collect_5min_candles",
+        replace_existing=True,
+    )
+
+    # 일별 신호 수집 (월~금 장 마감 후 16:30 KST)
+    scheduler.add_job(
+        run_daily_collect,
+        trigger="cron",
+        day_of_week="mon-fri",
+        hour="7",       # UTC 7시 = KST 16시
+        minute="30",
+        id="daily_collect",
         replace_existing=True,
     )
 

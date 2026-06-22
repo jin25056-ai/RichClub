@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { stockApi, AIPredictionItem } from '../../api/stock';
 
 type SignalFilter = '' | '매수' | '매도' | '관망';
@@ -7,139 +7,96 @@ const SIGNAL_COLOR: Record<string, string> = {
   매수: '#16a34a', 매도: '#dc2626', 관망: '#d97706',
 };
 
-const AIPredictionsSection: React.FC = () => {
+const SIGNAL_BG: Record<string, string> = {
+  매수: '#14532d', 매도: '#7f1d1d', 관망: '#78350f',
+};
+
+interface Props {
+  onSelectStock: (stockCode: string, stockName: string) => void;
+  selectedCode?: string;
+}
+
+const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) => {
   const [items, setItems] = useState<AIPredictionItem[]>([]);
-  const [filter, setFilter] = useState<SignalFilter>('매수');
+  const [filter, setFilter] = useState<SignalFilter>('');
   const [loading, setLoading] = useState(false);
-  const [detail, setDetail] = useState<any>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
 
   const fetchPredictions = (signal: SignalFilter) => {
     setLoading(true);
-    stockApi.getPredictions(signal || undefined, 30)
+    stockApi.getPredictions(signal || undefined, 100)
       .then((res) => setItems(res.data))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchPredictions(filter); }, [filter]);
+  React.useEffect(() => { fetchPredictions(''); }, []);
 
-  const handleDetail = (stock_code: string) => {
-    setDetailLoading(true);
-    stockApi.getAIDetail(stock_code)
-      .then((res) => setDetail(res.data))
-      .finally(() => setDetailLoading(false));
+  const handleFilter = (s: SignalFilter) => {
+    setFilter(s);
+    fetchPredictions(s);
   };
 
   return (
-    <div>
-      <div className="ex-filter-row">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* 필터 */}
+      <div style={{ display: 'flex', gap: 4, padding: '6px 8px', borderBottom: '1px solid #1e1e2e', flexWrap: 'wrap' }}>
         {(['', '매수', '매도', '관망'] as SignalFilter[]).map((s) => (
-          <button
-            key={s}
-            className={`ex-filter-btn${filter === s ? ' active' : ''}`}
-            onClick={() => setFilter(s)}
-          >
+          <button key={s} onClick={() => handleFilter(s)}
+            style={{
+              padding: '2px 7px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer',
+              background: filter === s ? '#6366f1' : '#1e1e2e',
+              color: filter === s ? '#fff' : '#888',
+            }}>
             {s || '전체'}
           </button>
         ))}
       </div>
 
+      {/* 목록 */}
       {loading ? (
-        <div className="ex-loading">불러오는 중...</div>
+        <div style={{ padding: 10, fontSize: 11, color: '#666' }}>불러오는 중...</div>
       ) : (
-        <div className="ex-table-wrap">
-          <table className="ex-table">
-            <thead>
-              <tr>
-                <th>종목코드</th><th>종목명</th><th>신호</th>
-                <th>현재가</th><th>신뢰도</th><th>상세</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.stock_code + item.predicted_at}>
-                  <td>{item.stock_code}</td>
-                  <td>{item.stock_name}</td>
-                  <td>
-                    <span className="ex-badge" style={{ background: SIGNAL_COLOR[item.signal] }}>
-                      {item.signal}
-                    </span>
-                  </td>
-                  <td>{item.current_price != null ? item.current_price.toLocaleString() : '-'}</td>
-                  <td>{item.confidence != null ? `${(item.confidence * 100).toFixed(1)}%` : '-'}</td>
-                  <td>
-                    <button className="ex-btn-sm" onClick={() => handleDetail(item.stock_code)}>
-                      보기
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {detail && (
-        <div className="ex-detail-panel">
-          <div className="ex-detail-header">
-            <span>{detail.stock_name} ({detail.stock_code})</span>
-            <span className="ex-badge" style={{ background: SIGNAL_COLOR[detail.signal] }}>
-              {detail.signal}
-            </span>
-            {detail.confidence != null && (
-              <span className="ex-confidence">신뢰도 {(detail.confidence * 100).toFixed(1)}%</span>
-            )}
-            <button className="ex-btn-sm" onClick={() => setDetail(null)}>닫기</button>
-          </div>
-
-          <div className="ex-detail-body">
-            <div className="ex-detail-col">
-              <h4>충족 조건</h4>
-              {detail.conditions_met.length > 0
-                ? detail.conditions_met.map((c: string) => (
-                    <div key={c} className="ex-cond met">✓ {c}</div>
-                  ))
-                : <div style={{ fontSize: 12, color: '#555' }}>없음</div>
-              }
-            </div>
-            <div className="ex-detail-col">
-              <h4>미충족 조건</h4>
-              {detail.conditions_not_met.length > 0
-                ? detail.conditions_not_met.map((c: string) => (
-                    <div key={c} className="ex-cond not">✗ {c}</div>
-                  ))
-                : <div style={{ fontSize: 12, color: '#555' }}>없음</div>
-              }
-            </div>
-            <div className="ex-detail-col">
-              <h4>기술 지표 현황</h4>
-              {detailLoading ? <div className="ex-loading">로딩중...</div> :
-                detail.feature_importance.length > 0
-                  ? detail.feature_importance.slice(0, 8).map((f: any) => {
-                      // importance가 있으면 중요도, 없으면 실제 지표값 표시
-                      const hasImportance = f.importance != null && !isNaN(f.importance);
-                      const displayVal = hasImportance
-                        ? `${(f.importance * 100).toFixed(1)}%`
-                        : f.value != null ? String(f.value) : '-';
-                      const barPct = hasImportance ? f.importance * 100 : 0;
-                      return (
-                        <div key={f.feature} className="ex-fi-row">
-                          <span className="ex-fi-name">{f.feature}</span>
-                          {hasImportance && (
-                            <div className="ex-fi-bar-wrap">
-                              <div className="ex-fi-bar" style={{ width: `${barPct.toFixed(0)}%` }} />
-                            </div>
-                          )}
-                          <span className="ex-fi-val" style={{ width: hasImportance ? 36 : 'auto' }}>
-                            {displayVal}
-                          </span>
-                        </div>
-                      );
-                    })
-                  : <div style={{ fontSize: 12, color: '#555' }}>데이터 없음</div>
-              }
-            </div>
-          </div>
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          {items.map((item) => {
+            const isActive = selectedCode === item.stock_code;
+            return (
+              <div key={item.stock_code + item.predicted_at}
+                onClick={() => onSelectStock(item.stock_code, item.stock_name)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #13131e',
+                  background: isActive ? '#1a1a30' : 'transparent',
+                }}
+                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#151525'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? '#1a1a30' : 'transparent'; }}
+              >
+                {/* 신호 뱃지 */}
+                <span style={{
+                  width: 26, textAlign: 'center', fontSize: 9, padding: '1px 2px', borderRadius: 3, flexShrink: 0,
+                  background: SIGNAL_BG[item.signal], color: SIGNAL_COLOR[item.signal], fontWeight: 700,
+                }}>
+                  {item.signal === '관망' ? '관망' : item.signal}
+                </span>
+                {/* 종목명 */}
+                <span style={{
+                  fontSize: 12, color: isActive ? '#a5b4fc' : '#d1d5db',
+                  flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  fontWeight: isActive ? 600 : 400,
+                }}>
+                  {item.stock_name}
+                </span>
+                {/* 현재가 */}
+                <span style={{ fontSize: 10, color: '#6b7280', flexShrink: 0 }}>
+                  {item.current_price != null
+                    ? item.current_price >= 1000000
+                      ? `${(item.current_price / 1000000).toFixed(1)}M`
+                      : item.current_price >= 1000
+                        ? `${Math.round(item.current_price / 1000)}K`
+                        : item.current_price
+                    : '-'}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
