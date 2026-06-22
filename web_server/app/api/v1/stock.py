@@ -1,9 +1,15 @@
 """
 주식 관련 API
 """
+import asyncio
+import functools
+import re
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+import numpy as np
+import pandas as pd
+import yfinance as yf
 from fastapi import APIRouter, Depends, HTTPException, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
@@ -43,6 +49,49 @@ class CandleResponse(BaseModel):
     stock_code: str
     interval: str
     data: List[CandleDataPoint]
+
+
+def _safe_float(v):
+    try:
+        f = float(v)
+        return None if f != f else round(f, 2)
+    except:
+        return None
+
+
+def _calc_rsi(closes: list, window: int = 14) -> list:
+    rsi = [None] * len(closes)
+    if len(closes) < window + 1:
+        return rsi
+    gains, losses = [], []
+    for i in range(1, len(closes)):
+        diff = closes[i] - closes[i - 1]
+        gains.append(max(diff, 0))
+        losses.append(max(-diff, 0))
+    avg_gain = sum(gains[:window]) / window
+    avg_loss = sum(losses[:window]) / window
+    for i in range(window, len(closes)):
+        if i > window:
+            avg_gain = (avg_gain * (window - 1) + gains[i - 1]) / window
+            avg_loss = (avg_loss * (window - 1) + losses[i - 1]) / window
+        rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
+        rsi[i] = 100 - (100 / (1 + rs))
+    return rsi
+
+
+def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
+    def ema(data, span):
+        result = [None] * len(data)
+        k = 2 / (span + 1)
+        for i, v in enumerate(data):
+            result[i] = v if i == 0 else v * k + result[i - 1] * (1 - k)
+        return result
+    ema_fast = ema(closes, fast)
+    ema_slow = ema(closes, slow)
+    macd_line = [(f - s) if f is not None and s is not None else None for f, s in zip(ema_fast, ema_slow)]
+    signal_line = ema([v if v is not None else 0 for v in macd_line], signal)
+    histogram = [(m - s) if m is not None else None for m, s in zip(macd_line, signal_line)]
+    return macd_line, signal_line, histogram
 
 
 @router.get("/list", response_model=List[StockItem], summary="종목 리스트")
@@ -235,7 +284,7 @@ async def get_candles(
             ))
         return CandleResponse(stock_code=stock_code, interval="5m", data=data)
 
-    # 2) DB 일봉 데이터 확인 (daily_collect로 채워진 경우)
+    # 2) DB 일봉 (stock_name 기준 조회, daily_collect로 채워진 데이터)
     cursor = db.total_trading_signals.find(
         {"stock_name": stock_code, "predicted_at": {"$gte": since}},
         {"_id": 0, "predicted_at": 1, "open": 1, "high": 1, "low": 1, "close": 1,
@@ -243,8 +292,7 @@ async def get_candles(
     ).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]
 
-    # DB 데이터가 충분히 있으면 (날짜 수가 요청 기간의 50% 이상)
-    if len(docs) >= days * 0.3:
+    if len(docs) >= int(days * 0.3):
         data = []
         for d in docs:
             dt = d["predicted_at"]
@@ -259,101 +307,25 @@ async def get_candles(
             ))
         return CandleResponse(stock_code=stock_code, interval="1d", data=data)
 
-    # 3) DB 데이터 부족 → yfinance로 직접 수집
-    import asyncio, functools
-    import numpy as np
-    import pandas as pd
-    import yfinance as yf
+    # 3) DB 데이터 부족 → yfinance 직접 수집
+    # stock_name으로 종목코드 조회
+    doc_info = await db.total_trading_signals.find_one(
+        {"stock_name": stock_code}, {"stock_code": 1}
+    )
+    code_str = doc_info.get("stock_code", "") if doc_info else ""
 
-    # 종목명으로 티커 조회
-    doc_info = await db.total_trading_signals.find_one({"stock_name": stock_code}, {"stock_code": 1})
-    code_str = doc_info.get("stock_code", stock_code) if doc_info else stock_code
-
-    # 티커가 6자리 숫자면 .KS 붙이기, 아니면 종목명으로 검색 불가 → 빈 응답
-    import re
-    if re.match(r'^\d{6}
-
-
-def _calc_rsi(closes: list, window: int = 14) -> list:
-    rsi = [None] * len(closes)
-    if len(closes) < window + 1:
-        return rsi
-    gains, losses = [], []
-    for i in range(1, len(closes)):
-        diff = closes[i] - closes[i - 1]
-        gains.append(max(diff, 0))
-        losses.append(max(-diff, 0))
-    avg_gain = sum(gains[:window]) / window
-    avg_loss = sum(losses[:window]) / window
-    for i in range(window, len(closes)):
-        if i > window:
-            avg_gain = (avg_gain * (window - 1) + gains[i - 1]) / window
-            avg_loss = (avg_loss * (window - 1) + losses[i - 1]) / window
-        rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
-        rsi[i] = 100 - (100 / (1 + rs))
-    return rsi
-
-
-def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
-    def ema(data, span):
-        result = [None] * len(data)
-        k = 2 / (span + 1)
-        for i, v in enumerate(data):
-            result[i] = v if i == 0 else v * k + result[i - 1] * (1 - k)
-        return result
-    ema_fast = ema(closes, fast)
-    ema_slow = ema(closes, slow)
-    macd_line = [(f - s) if f is not None and s is not None else None for f, s in zip(ema_fast, ema_slow)]
-    signal_line = ema([v if v is not None else 0 for v in macd_line], signal)
-    histogram = [(m - s) if m is not None else None for m, s in zip(macd_line, signal_line)]
-    return macd_line, signal_line, histogram
-, code_str):
-        ticker = code_str + ".KS"
-    else:
-        # stock_code가 종목명인 경우 DB에서 종목코드 찾기 어려움 → stock_code 필드로 재시도
-        doc_info2 = await db.total_trading_signals.find_one({"stock_code": stock_code}, {"stock_code": 1})
-        if doc_info2 and re.match(r'^\d{6}
-
-
-def _calc_rsi(closes: list, window: int = 14) -> list:
-    rsi = [None] * len(closes)
-    if len(closes) < window + 1:
-        return rsi
-    gains, losses = [], []
-    for i in range(1, len(closes)):
-        diff = closes[i] - closes[i - 1]
-        gains.append(max(diff, 0))
-        losses.append(max(-diff, 0))
-    avg_gain = sum(gains[:window]) / window
-    avg_loss = sum(losses[:window]) / window
-    for i in range(window, len(closes)):
-        if i > window:
-            avg_gain = (avg_gain * (window - 1) + gains[i - 1]) / window
-            avg_loss = (avg_loss * (window - 1) + losses[i - 1]) / window
-        rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
-        rsi[i] = 100 - (100 / (1 + rs))
-    return rsi
-
-
-def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
-    def ema(data, span):
-        result = [None] * len(data)
-        k = 2 / (span + 1)
-        for i, v in enumerate(data):
-            result[i] = v if i == 0 else v * k + result[i - 1] * (1 - k)
-        return result
-    ema_fast = ema(closes, fast)
-    ema_slow = ema(closes, slow)
-    macd_line = [(f - s) if f is not None and s is not None else None for f, s in zip(ema_fast, ema_slow)]
-    signal_line = ema([v if v is not None else 0 for v in macd_line], signal)
-    histogram = [(m - s) if m is not None else None for m, s in zip(macd_line, signal_line)]
-    return macd_line, signal_line, histogram
-, doc_info2.get("stock_code", "")):
-            ticker = doc_info2["stock_code"] + ".KS"
+    if not re.match(r'^\d{6}$', code_str):
+        # stock_code 필드로 재시도
+        doc_info2 = await db.total_trading_signals.find_one(
+            {"stock_code": stock_code}, {"stock_code": 1}
+        )
+        if doc_info2 and re.match(r'^\d{6}$', doc_info2.get("stock_code", "")):
+            code_str = doc_info2["stock_code"]
         else:
             raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
 
-    buf_days = days + 70  # MA60 계산용 버퍼
+    ticker = code_str + ".KS"
+    buf_days = days + 70
     start_str = (datetime.utcnow() - timedelta(days=buf_days)).strftime("%Y-%m-%d")
     end_str = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -378,17 +350,16 @@ def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
         for dt, row in raw.iterrows():
             if dt.replace(tzinfo=None) < cutoff:
                 continue
-            def sf(v):
-                try:
-                    f = float(v)
-                    return None if f != f else round(f, 2)
-                except:
-                    return None
             result.append(CandleDataPoint(
                 datetime=dt.strftime("%Y-%m-%d"),
-                open=sf(row.get("open")), high=sf(row.get("high")),
-                low=sf(row.get("low")), close=sf(row.get("close")), volume=sf(row.get("volume")),
-                ma5=sf(ma5.get(dt)), ma20=sf(ma20.get(dt)), ma60=sf(ma60.get(dt)),
+                open=_safe_float(row.get("open")),
+                high=_safe_float(row.get("high")),
+                low=_safe_float(row.get("low")),
+                close=_safe_float(row.get("close")),
+                volume=_safe_float(row.get("volume")),
+                ma5=_safe_float(ma5.get(dt)),
+                ma20=_safe_float(ma20.get(dt)),
+                ma60=_safe_float(ma60.get(dt)),
             ))
         return result
 
@@ -402,38 +373,3 @@ def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
         raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
 
     return CandleResponse(stock_code=stock_code, interval="1d", data=data)
-
-
-def _calc_rsi(closes: list, window: int = 14) -> list:
-    rsi = [None] * len(closes)
-    if len(closes) < window + 1:
-        return rsi
-    gains, losses = [], []
-    for i in range(1, len(closes)):
-        diff = closes[i] - closes[i - 1]
-        gains.append(max(diff, 0))
-        losses.append(max(-diff, 0))
-    avg_gain = sum(gains[:window]) / window
-    avg_loss = sum(losses[:window]) / window
-    for i in range(window, len(closes)):
-        if i > window:
-            avg_gain = (avg_gain * (window - 1) + gains[i - 1]) / window
-            avg_loss = (avg_loss * (window - 1) + losses[i - 1]) / window
-        rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
-        rsi[i] = 100 - (100 / (1 + rs))
-    return rsi
-
-
-def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
-    def ema(data, span):
-        result = [None] * len(data)
-        k = 2 / (span + 1)
-        for i, v in enumerate(data):
-            result[i] = v if i == 0 else v * k + result[i - 1] * (1 - k)
-        return result
-    ema_fast = ema(closes, fast)
-    ema_slow = ema(closes, slow)
-    macd_line = [(f - s) if f is not None and s is not None else None for f, s in zip(ema_fast, ema_slow)]
-    signal_line = ema([v if v is not None else 0 for v in macd_line], signal)
-    histogram = [(m - s) if m is not None else None for m, s in zip(macd_line, signal_line)]
-    return macd_line, signal_line, histogram
