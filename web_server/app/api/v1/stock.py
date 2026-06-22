@@ -211,19 +211,18 @@ async def get_macd(
 @router.get("/chart/candle/{stock_code}", response_model=CandleResponse, summary="캔들 차트 데이터")
 async def get_candles(
     stock_code: str,
-    days: int = Query(30, ge=1, le=180),
+    days: int = Query(30, ge=1, le=240),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
     since = datetime.utcnow() - timedelta(days=days)
 
-    # 5분봉 먼저 시도
+    # 1) 5분봉 먼저 시도
     cursor = db.candles_5m.find(
         {"stock_code": stock_code, "datetime": {"$gte": since}},
         {"_id": 0, "datetime": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
     ).sort("datetime", 1)
     docs = [doc async for doc in cursor]
-
     if docs:
         data = []
         for d in docs:
@@ -236,29 +235,171 @@ async def get_candles(
             ))
         return CandleResponse(stock_code=stock_code, interval="5m", data=data)
 
-    # 5분봉 없으면 total_trading_signals 일봉 + 이동평균 포함
+    # 2) DB 일봉 데이터 확인 (daily_collect로 채워진 경우)
     cursor = db.total_trading_signals.find(
-        {"stock_code": stock_code, "predicted_at": {"$gte": since}},
+        {"stock_name": stock_code, "predicted_at": {"$gte": since}},
         {"_id": 0, "predicted_at": 1, "open": 1, "high": 1, "low": 1, "close": 1,
          "volume": 1, "ma5": 1, "ma20": 1, "ma60": 1}
     ).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]
 
-    if not docs:
-        raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
+    # DB 데이터가 충분히 있으면 (날짜 수가 요청 기간의 50% 이상)
+    if len(docs) >= days * 0.3:
+        data = []
+        for d in docs:
+            dt = d["predicted_at"]
+            dt_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
+            data.append(CandleDataPoint(
+                datetime=dt_str,
+                open=d.get("open"), high=d.get("high"),
+                low=d.get("low"), close=d.get("close"), volume=d.get("volume"),
+                ma5=round(float(d["ma5"]), 0) if d.get("ma5") else None,
+                ma20=round(float(d["ma20"]), 0) if d.get("ma20") else None,
+                ma60=round(float(d["ma60"]), 0) if d.get("ma60") else None,
+            ))
+        return CandleResponse(stock_code=stock_code, interval="1d", data=data)
 
-    data = []
-    for d in docs:
-        dt = d["predicted_at"]
-        dt_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
-        data.append(CandleDataPoint(
-            datetime=dt_str,
-            open=d.get("open"), high=d.get("high"),
-            low=d.get("low"), close=d.get("close"), volume=d.get("volume"),
-            ma5=round(float(d["ma5"]), 0) if d.get("ma5") else None,
-            ma20=round(float(d["ma20"]), 0) if d.get("ma20") else None,
-            ma60=round(float(d["ma60"]), 0) if d.get("ma60") else None,
-        ))
+    # 3) DB 데이터 부족 → yfinance로 직접 수집
+    import asyncio, functools
+    import numpy as np
+    import pandas as pd
+    import yfinance as yf
+
+    # 종목명으로 티커 조회
+    doc_info = await db.total_trading_signals.find_one({"stock_name": stock_code}, {"stock_code": 1})
+    code_str = doc_info.get("stock_code", stock_code) if doc_info else stock_code
+
+    # 티커가 6자리 숫자면 .KS 붙이기, 아니면 종목명으로 검색 불가 → 빈 응답
+    import re
+    if re.match(r'^\d{6}
+
+
+def _calc_rsi(closes: list, window: int = 14) -> list:
+    rsi = [None] * len(closes)
+    if len(closes) < window + 1:
+        return rsi
+    gains, losses = [], []
+    for i in range(1, len(closes)):
+        diff = closes[i] - closes[i - 1]
+        gains.append(max(diff, 0))
+        losses.append(max(-diff, 0))
+    avg_gain = sum(gains[:window]) / window
+    avg_loss = sum(losses[:window]) / window
+    for i in range(window, len(closes)):
+        if i > window:
+            avg_gain = (avg_gain * (window - 1) + gains[i - 1]) / window
+            avg_loss = (avg_loss * (window - 1) + losses[i - 1]) / window
+        rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
+        rsi[i] = 100 - (100 / (1 + rs))
+    return rsi
+
+
+def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
+    def ema(data, span):
+        result = [None] * len(data)
+        k = 2 / (span + 1)
+        for i, v in enumerate(data):
+            result[i] = v if i == 0 else v * k + result[i - 1] * (1 - k)
+        return result
+    ema_fast = ema(closes, fast)
+    ema_slow = ema(closes, slow)
+    macd_line = [(f - s) if f is not None and s is not None else None for f, s in zip(ema_fast, ema_slow)]
+    signal_line = ema([v if v is not None else 0 for v in macd_line], signal)
+    histogram = [(m - s) if m is not None else None for m, s in zip(macd_line, signal_line)]
+    return macd_line, signal_line, histogram
+, code_str):
+        ticker = code_str + ".KS"
+    else:
+        # stock_code가 종목명인 경우 DB에서 종목코드 찾기 어려움 → stock_code 필드로 재시도
+        doc_info2 = await db.total_trading_signals.find_one({"stock_code": stock_code}, {"stock_code": 1})
+        if doc_info2 and re.match(r'^\d{6}
+
+
+def _calc_rsi(closes: list, window: int = 14) -> list:
+    rsi = [None] * len(closes)
+    if len(closes) < window + 1:
+        return rsi
+    gains, losses = [], []
+    for i in range(1, len(closes)):
+        diff = closes[i] - closes[i - 1]
+        gains.append(max(diff, 0))
+        losses.append(max(-diff, 0))
+    avg_gain = sum(gains[:window]) / window
+    avg_loss = sum(losses[:window]) / window
+    for i in range(window, len(closes)):
+        if i > window:
+            avg_gain = (avg_gain * (window - 1) + gains[i - 1]) / window
+            avg_loss = (avg_loss * (window - 1) + losses[i - 1]) / window
+        rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
+        rsi[i] = 100 - (100 / (1 + rs))
+    return rsi
+
+
+def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
+    def ema(data, span):
+        result = [None] * len(data)
+        k = 2 / (span + 1)
+        for i, v in enumerate(data):
+            result[i] = v if i == 0 else v * k + result[i - 1] * (1 - k)
+        return result
+    ema_fast = ema(closes, fast)
+    ema_slow = ema(closes, slow)
+    macd_line = [(f - s) if f is not None and s is not None else None for f, s in zip(ema_fast, ema_slow)]
+    signal_line = ema([v if v is not None else 0 for v in macd_line], signal)
+    histogram = [(m - s) if m is not None else None for m, s in zip(macd_line, signal_line)]
+    return macd_line, signal_line, histogram
+, doc_info2.get("stock_code", "")):
+            ticker = doc_info2["stock_code"] + ".KS"
+        else:
+            raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
+
+    buf_days = days + 70  # MA60 계산용 버퍼
+    start_str = (datetime.utcnow() - timedelta(days=buf_days)).strftime("%Y-%m-%d")
+    end_str = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    def _fetch():
+        raw = yf.download(ticker, start=start_str, end=end_str, interval="1d", progress=False, auto_adjust=True)
+        if raw.empty:
+            return []
+        if isinstance(raw.columns, pd.MultiIndex):
+            raw.columns = raw.columns.droplevel(1)
+        raw.columns = [c.lower() for c in raw.columns]
+        raw = raw.rename(columns={"adj close": "close"})
+        raw.index = pd.to_datetime(raw.index)
+        raw = raw.dropna(subset=["close"])
+
+        close = raw["close"]
+        ma5  = close.rolling(5).mean()
+        ma20 = close.rolling(20).mean()
+        ma60 = close.rolling(60).mean()
+
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        result = []
+        for dt, row in raw.iterrows():
+            if dt.replace(tzinfo=None) < cutoff:
+                continue
+            def sf(v):
+                try:
+                    f = float(v)
+                    return None if f != f else round(f, 2)
+                except:
+                    return None
+            result.append(CandleDataPoint(
+                datetime=dt.strftime("%Y-%m-%d"),
+                open=sf(row.get("open")), high=sf(row.get("high")),
+                low=sf(row.get("low")), close=sf(row.get("close")), volume=sf(row.get("volume")),
+                ma5=sf(ma5.get(dt)), ma20=sf(ma20.get(dt)), ma60=sf(ma60.get(dt)),
+            ))
+        return result
+
+    try:
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, functools.partial(_fetch))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"yfinance 수집 실패: {str(e)}")
+
+    if not data:
+        raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
 
     return CandleResponse(stock_code=stock_code, interval="1d", data=data)
 
