@@ -34,7 +34,6 @@ def _db() -> AsyncIOMotorDatabase:
     return get_db()
 
 
-# ── 5분봉 스키마 ───────────────────────────────────────────────────────────────
 class CandleDataPoint(BaseModel):
     datetime: str
     open: Optional[float]
@@ -46,11 +45,10 @@ class CandleDataPoint(BaseModel):
 
 class CandleResponse(BaseModel):
     stock_code: str
-    interval: str   # "5m" 또는 "1d"
+    interval: str
     data: List[CandleDataPoint]
 
 
-# ── 종목 리스트 ────────────────────────────────────────────────────────────────
 @router.get("/list", response_model=List[StockItem], summary="종목 리스트")
 async def get_stock_list(
     db: AsyncIOMotorDatabase = Depends(_db),
@@ -66,7 +64,6 @@ async def get_stock_list(
     return result
 
 
-# ── 종목 검색 ──────────────────────────────────────────────────────────────────
 @router.get("/search", response_model=List[StockSearchResult], summary="종목 검색")
 async def search_stock(
     q: str = Query(..., description="종목코드 또는 종목명 검색어"),
@@ -92,7 +89,6 @@ async def search_stock(
     return result
 
 
-# ── AI 예측 목록 ───────────────────────────────────────────────────────────────
 @router.get("/ai/predictions", response_model=List[AIPredictionItem], summary="AI 예측 목록")
 async def get_ai_predictions(
     signal: Optional[str] = Query(None, description="매수 / 매도 / 관망 필터"),
@@ -121,7 +117,6 @@ async def get_ai_predictions(
     return result
 
 
-# ── AI 분석 상세 ───────────────────────────────────────────────────────────────
 @router.get("/ai/detail/{stock_code}", response_model=AIDetailResponse, summary="AI 분석 상세")
 async def get_ai_detail(
     stock_code: str,
@@ -137,12 +132,22 @@ async def get_ai_detail(
 
     feature_importance = doc.get("feature_importance", [])
     if not feature_importance:
-        fi_fields = ["macd", "stoch_k", "stoch_d", "obv", "ma5_20_ratio",
-                     "ma20_60_ratio", "close_ma60_ratio", "vix_value"]
-        for f in fi_fields:
+        # feature_importance 없으면 지표값을 상대적 중요도 형태로 구성
+        fi_fields = {
+            "rsi": "RSI",
+            "macd": "MACD",
+            "stoch_k": "스토캐스틱 K",
+            "stoch_d": "스토캐스틱 D",
+            "ma5_20_ratio": "5/20일선 비율",
+            "ma20_60_ratio": "20/60일선 비율",
+            "close_ma60_ratio": "종가/60일선 비율",
+            "vix_value": "VIX",
+        }
+        for f, label in fi_fields.items():
             if f in doc and doc[f] is not None:
                 feature_importance.append({
-                    "feature": f,
+                    "feature": label,
+                    "importance": None,
                     "value": round(float(doc[f]), 4),
                     "direction": "positive" if float(doc[f]) > 0 else "negative"
                 })
@@ -159,7 +164,6 @@ async def get_ai_detail(
     )
 
 
-# ── RSI 차트 ───────────────────────────────────────────────────────────────────
 @router.get("/chart/rsi/{stock_code}", response_model=RSIResponse, summary="RSI 차트 데이터")
 async def get_rsi(
     stock_code: str,
@@ -187,7 +191,6 @@ async def get_rsi(
     data = []
 
     has_rsi = any(d.get("rsi") is not None for d in docs)
-
     if has_rsi:
         for d in docs:
             dt = d["predicted_at"]
@@ -207,7 +210,6 @@ async def get_rsi(
     return RSIResponse(stock_code=stock_code, stock_name=stock_name, period=period, data=data)
 
 
-# ── MACD 차트 ──────────────────────────────────────────────────────────────────
 @router.get("/chart/macd/{stock_code}", response_model=MACDResponse, summary="MACD 차트 데이터")
 async def get_macd(
     stock_code: str,
@@ -251,11 +253,10 @@ async def get_macd(
     return MACDResponse(stock_code=stock_code, stock_name=stock_name, period=period, data=data)
 
 
-# ── 캔들 차트 (5분봉 없으면 일봉으로 대체) ────────────────────────────────────
 @router.get("/chart/candle/{stock_code}", response_model=CandleResponse, summary="캔들 차트 데이터")
 async def get_candles(
     stock_code: str,
-    days: int = Query(1, ge=1, le=30, description="조회 일수 (최대 30일)"),
+    days: int = Query(30, ge=1, le=180, description="조회 일수 (최대 180일)"),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
@@ -281,9 +282,8 @@ async def get_candles(
         return CandleResponse(stock_code=stock_code, interval="5m", data=data)
 
     # 2. 5분봉 없으면 total_trading_signals의 일봉으로 대체
-    since_daily = datetime.utcnow() - timedelta(days=max(days, 30))
     cursor = db.total_trading_signals.find(
-        {"stock_code": stock_code, "predicted_at": {"$gte": since_daily}},
+        {"stock_code": stock_code, "predicted_at": {"$gte": since}},
         {"_id": 0, "predicted_at": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
     ).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]
@@ -304,7 +304,6 @@ async def get_candles(
     return CandleResponse(stock_code=stock_code, interval="1d", data=data)
 
 
-# ── 내부 계산 함수 ─────────────────────────────────────────────────────────────
 def _calc_rsi(closes: list, window: int = 14) -> list:
     rsi = [None] * len(closes)
     if len(closes) < window + 1:
