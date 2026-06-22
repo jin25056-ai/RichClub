@@ -294,7 +294,7 @@ async def get_candles(
     ).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]
 
-    if len(docs) >= int(days * 0.3):
+    if len(docs) >= 5:
         data = []
         for d in docs:
             dt = d["predicted_at"]
