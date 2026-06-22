@@ -1,9 +1,8 @@
 """
 주식 관련 API
 - AI 예측 목록 (매수/매도/관망 태그)
-- RSI 차트 데이터
-- MACD 차트 데이터
-- 5분봉 차트 데이터
+- RSI / MACD 차트 (total_trading_signals 기반 계산)
+- 5분봉 차트
 - 종목 리스트 / 검색
 - AI 분석 상세 (매수 근거)
 """
@@ -29,17 +28,6 @@ router = APIRouter(prefix="/stock", tags=["stock"])
 
 SIGNAL_MAP = {0: "매도", 1: "매수", 2: "관망"}
 PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
-
-CONDITION_LABELS = {
-    "cond_yang_bong":         "양봉 (종가 > 시가)",
-    "cond_ma5_20_gc":         "5일선/20일선 골든크로스",
-    "cond_ma60_filter":       "60일선 위 또는 상향 돌파",
-    "cond_macd_total":        "MACD 정배열 및 상승 중",
-    "cond_stoch_pure":        "스토캐스틱 K선 > D선",
-    "cond_obv_rising":        "OBV 상승 (거래량 수반)",
-    "cond_sp500_bear_market": "S&P500 하락장 아님",
-    "watch_signal":           "관망 4대 요건 충족",
-}
 
 
 def _db() -> AsyncIOMotorDatabase:
@@ -68,7 +56,7 @@ async def get_stock_list(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    cursor = db.stock_ohlcv.aggregate([
+    cursor = db.total_trading_signals.aggregate([
         {"$group": {"_id": "$stock_code", "stock_name": {"$first": "$stock_name"}}},
         {"$sort": {"_id": 1}},
     ])
@@ -85,7 +73,7 @@ async def search_stock(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    cursor = db.stock_ohlcv.aggregate([
+    cursor = db.total_trading_signals.aggregate([
         {
             "$match": {
                 "$or": [
@@ -152,11 +140,11 @@ async def get_ai_detail(
         fi_fields = ["macd", "stoch_k", "stoch_d", "obv", "ma5_20_ratio",
                      "ma20_60_ratio", "close_ma60_ratio", "vix_value"]
         for f in fi_fields:
-            if f in doc:
+            if f in doc and doc[f] is not None:
                 feature_importance.append({
                     "feature": f,
-                    "value": round(float(doc[f]), 4) if doc[f] is not None else None,
-                    "direction": "positive" if doc.get(f, 0) > 0 else "negative"
+                    "value": round(float(doc[f]), 4),
+                    "direction": "positive" if float(doc[f]) > 0 else "negative"
                 })
 
     return AIDetailResponse(
@@ -171,7 +159,7 @@ async def get_ai_detail(
     )
 
 
-# ── RSI 차트 ───────────────────────────────────────────────────────────────────
+# ── RSI 차트 (total_trading_signals 기반) ──────────────────────────────────────
 @router.get("/chart/rsi/{stock_code}", response_model=RSIResponse, summary="RSI 차트 데이터")
 async def get_rsi(
     stock_code: str,
@@ -185,32 +173,43 @@ async def get_rsi(
     days = PERIOD_DAYS[period]
     since = datetime.utcnow() - timedelta(days=days + 20)
 
-    cursor = db.stock_ohlcv.find(
-        {"stock_code": stock_code, "date": {"$gte": since}},
-        {"date": 1, "close": 1, "stock_name": 1, "_id": 0}
-    ).sort("date", 1)
+    # total_trading_signals에서 종목의 날짜별 close + rsi 조회
+    cursor = db.total_trading_signals.find(
+        {"stock_code": stock_code, "predicted_at": {"$gte": since}},
+        {"predicted_at": 1, "close": 1, "rsi": 1, "stock_name": 1, "_id": 0}
+    ).sort("predicted_at", 1)
 
     docs = [doc async for doc in cursor]
     if not docs:
         raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
 
     stock_name = docs[0].get("stock_name", "")
-    closes = [float(d["close"]) for d in docs]
-    dates = [d["date"].strftime("%Y-%m-%d") if hasattr(d["date"], "strftime") else str(d["date"]) for d in docs]
-    rsi_values = _calc_rsi(closes, window=14)
-
     cutoff = datetime.utcnow() - timedelta(days=days)
     data = []
-    for i, d in enumerate(docs):
-        dt = d["date"]
-        dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
-        if dt_naive >= cutoff and rsi_values[i] is not None:
-            data.append(RSIDataPoint(date=dates[i], rsi=round(rsi_values[i], 2)))
+
+    # rsi 컬럼이 있으면 그대로 사용, 없으면 close로 계산
+    has_rsi = any(d.get("rsi") is not None for d in docs)
+
+    if has_rsi:
+        for d in docs:
+            dt = d["predicted_at"]
+            dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
+            if dt_naive >= cutoff and d.get("rsi") is not None:
+                date_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
+                data.append(RSIDataPoint(date=date_str, rsi=round(float(d["rsi"]), 2)))
+    else:
+        closes = [float(d["close"]) for d in docs if d.get("close")]
+        dates = [d["predicted_at"] for d in docs if d.get("close")]
+        rsi_values = _calc_rsi(closes, window=14)
+        for i, dt in enumerate(dates):
+            dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
+            if dt_naive >= cutoff and rsi_values[i] is not None:
+                data.append(RSIDataPoint(date=dt.strftime("%Y-%m-%d"), rsi=round(rsi_values[i], 2)))
 
     return RSIResponse(stock_code=stock_code, stock_name=stock_name, period=period, data=data)
 
 
-# ── MACD 차트 ──────────────────────────────────────────────────────────────────
+# ── MACD 차트 (total_trading_signals 기반) ─────────────────────────────────────
 @router.get("/chart/macd/{stock_code}", response_model=MACDResponse, summary="MACD 차트 데이터")
 async def get_macd(
     stock_code: str,
@@ -224,28 +223,28 @@ async def get_macd(
     days = PERIOD_DAYS[period]
     since = datetime.utcnow() - timedelta(days=days + 40)
 
-    cursor = db.stock_ohlcv.find(
-        {"stock_code": stock_code, "date": {"$gte": since}},
-        {"date": 1, "close": 1, "stock_name": 1, "_id": 0}
-    ).sort("date", 1)
+    cursor = db.total_trading_signals.find(
+        {"stock_code": stock_code, "predicted_at": {"$gte": since}},
+        {"predicted_at": 1, "close": 1, "macd": 1, "stock_name": 1, "_id": 0}
+    ).sort("predicted_at", 1)
 
     docs = [doc async for doc in cursor]
     if not docs:
         raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
 
     stock_name = docs[0].get("stock_name", "")
-    closes = [float(d["close"]) for d in docs]
-    dates = [d["date"].strftime("%Y-%m-%d") if hasattr(d["date"], "strftime") else str(d["date"]) for d in docs]
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    closes = [float(d["close"]) for d in docs if d.get("close")]
+    dates = [d["predicted_at"] for d in docs if d.get("close")]
     macd_line, signal_line, histogram = _calc_macd(closes)
 
-    cutoff = datetime.utcnow() - timedelta(days=days)
     data = []
-    for i, d in enumerate(docs):
-        dt = d["date"]
+    for i, dt in enumerate(dates):
         dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
         if dt_naive >= cutoff and macd_line[i] is not None:
             data.append(MACDDataPoint(
-                date=dates[i],
+                date=dt.strftime("%Y-%m-%d"),
                 macd=round(macd_line[i], 4),
                 signal=round(signal_line[i], 4),
                 histogram=round(histogram[i], 4),
@@ -262,10 +261,6 @@ async def get_candles(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """
-    종목별 5분봉 데이터 반환
-    candles_5m 컬렉션에서 조회 (스케줄러가 장 중 5분마다 누적 수집)
-    """
     since = datetime.utcnow() - timedelta(days=days)
 
     cursor = db.candles_5m.find(
@@ -283,11 +278,8 @@ async def get_candles(
         dt_str = dt.strftime("%Y-%m-%d %H:%M") if hasattr(dt, "strftime") else str(dt)
         data.append(CandleDataPoint(
             datetime=dt_str,
-            open=d.get("open"),
-            high=d.get("high"),
-            low=d.get("low"),
-            close=d.get("close"),
-            volume=d.get("volume"),
+            open=d.get("open"), high=d.get("high"),
+            low=d.get("low"), close=d.get("close"), volume=d.get("volume"),
         ))
 
     return CandleResponse(stock_code=stock_code, interval="5m", data=data)
@@ -298,23 +290,19 @@ def _calc_rsi(closes: list, window: int = 14) -> list:
     rsi = [None] * len(closes)
     if len(closes) < window + 1:
         return rsi
-
     gains, losses = [], []
     for i in range(1, len(closes)):
         diff = closes[i] - closes[i - 1]
         gains.append(max(diff, 0))
         losses.append(max(-diff, 0))
-
     avg_gain = sum(gains[:window]) / window
     avg_loss = sum(losses[:window]) / window
-
     for i in range(window, len(closes)):
         if i > window:
             avg_gain = (avg_gain * (window - 1) + gains[i - 1]) / window
             avg_loss = (avg_loss * (window - 1) + losses[i - 1]) / window
         rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
         rsi[i] = 100 - (100 / (1 + rs))
-
     return rsi
 
 
@@ -325,7 +313,6 @@ def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
         for i, v in enumerate(data):
             result[i] = v if i == 0 else v * k + result[i - 1] * (1 - k)
         return result
-
     ema_fast = ema(closes, fast)
     ema_slow = ema(closes, slow)
     macd_line = [(f - s) if f is not None and s is not None else None for f, s in zip(ema_fast, ema_slow)]
