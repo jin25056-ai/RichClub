@@ -5,12 +5,13 @@ const BASE_URL = process.env.REACT_APP_API_BASE_URL ?? 'http://localhost:8000';
 const apiClient = axios.create({
   baseURL: BASE_URL,
   timeout: 10000,
+  withCredentials: true,  // HttpOnly 쿠키 자동 전송
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// 요청 인터셉터: access token 주입
+// 요청 인터셉터: localStorage 토큰 있으면 Bearer 헤더 추가 (쿠키와 병행)
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = localStorage.getItem('access_token');
@@ -34,9 +35,11 @@ apiClient.interceptors.response.use(
 
       if (refreshToken) {
         try {
-          const res = await axios.post(`${BASE_URL}/api/v1/auth/refresh`, {
-            refresh_token: refreshToken,
-          });
+          const res = await axios.post(
+            `${BASE_URL}/api/v1/auth/refresh`,
+            { refresh_token: refreshToken },
+            { withCredentials: true }
+          );
           const { access_token, refresh_token } = res.data;
           localStorage.setItem('access_token', access_token);
           localStorage.setItem('refresh_token', refresh_token);

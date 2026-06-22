@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     mongodb_db: str = "richclub"
     jwt_secret_key: str = "change-this-secret-key-in-production"
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 60
+    jwt_access_token_expire_minutes: int = 1440  # 24시간
 
 
 settings = Settings()
