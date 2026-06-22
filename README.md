@@ -193,7 +193,7 @@ https://richclub.efforthye.dev 에 반영
 
 ```bash
 # 서비스 설치 (재부팅 시 자동 실행) 
-sudo cloudflared service install
+sudo cloudflared service install 
 
 # 서비스 상태 확인
 sudo launchctl list | grep cloudflared
