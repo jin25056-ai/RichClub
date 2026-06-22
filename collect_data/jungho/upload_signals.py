@@ -1,9 +1,9 @@
 """
-total_trading_signals.csv → MongoDB 업로드 스크립트
+total_trading_signals.csv -> MongoDB 업로드 스크립트
 
 사용법:
   python upload_signals.py                    # 기본 CSV 경로 사용
-  python upload_signals.py --csv /path/to/file.csv  # CSV 경로 직접 지정
+  python upload_signals.py --csv /path/to/file.csv
   python upload_signals.py --replace          # 기존 컬렉션 전체 교체
 """
 import os
@@ -24,6 +24,14 @@ DEFAULT_CSV = os.path.join(os.path.dirname(__file__), 'total_trading_signals.csv
 SIGNAL_TO_INT = {"매도": 0, "매수": 1, "관망": 2}
 
 
+def _get_mongo_uri() -> str:
+    return os.getenv("MONGODB_URI") or os.getenv("MONGO_URI") or ""
+
+
+def _get_db_name() -> str:
+    return os.getenv("MONGODB_DB") or os.getenv("DB_NAME") or "richclub"
+
+
 def load_csv(csv_path: str) -> pd.DataFrame:
     df = pd.read_csv(csv_path, encoding='utf-8-sig')
     logger.info(f"CSV 로드 완료: {len(df)}행, 컬럼={list(df.columns)}")
@@ -31,23 +39,13 @@ def load_csv(csv_path: str) -> pd.DataFrame:
 
 
 def preprocess(df: pd.DataFrame) -> list:
-    """DataFrame → MongoDB 도큐먼트 리스트 변환"""
     docs = []
-
-    # 컬럼명 정리
-    col_map = {
-        '날짜': 'date',
-        '종목명': 'stock_name',
-        '종가': 'close',
-        '시그널': 'signal',
-    }
+    col_map = {'날짜': 'date', '종목명': 'stock_name', '종가': 'close', '시그널': 'signal'}
     df = df.rename(columns=col_map)
 
     for _, row in df.iterrows():
         signal_str = str(row.get('signal', '관망')).strip()
         signal_label = SIGNAL_TO_INT.get(signal_str, 2)
-
-        # 종목코드가 없으면 종목명으로 대체 (추후 종목코드 컬럼 추가 시 수정)
         stock_code = str(row.get('stock_code', row.get('종목코드', row.get('stock_name', '')))).strip()
 
         doc = {
@@ -60,12 +58,14 @@ def preprocess(df: pd.DataFrame) -> list:
             'high': _safe_float(row.get('high')),
             'low': _safe_float(row.get('low')),
             'volume': _safe_float(row.get('volume')),
-            # 기술적 지표
             'rsi': _safe_float(row.get('rsi')),
             'macd': _safe_float(row.get('macd')),
             'stoch_k': _safe_float(row.get('stoch_k')),
             'stoch_d': _safe_float(row.get('stoch_d')),
             'obv': _safe_float(row.get('obv')),
+            'ma5': _safe_float(row.get('ma5')),
+            'ma20': _safe_float(row.get('ma20')),
+            'ma60': _safe_float(row.get('ma60')),
             'ma5_20_ratio': _safe_float(row.get('ma5_20_ratio')),
             'ma20_60_ratio': _safe_float(row.get('ma20_60_ratio')),
             'close_ma60_ratio': _safe_float(row.get('close_ma60_ratio')),
@@ -75,9 +75,7 @@ def preprocess(df: pd.DataFrame) -> list:
             'vix_value': _safe_float(row.get('vix_value')),
             'sp500': _safe_float(row.get('sp500')),
             'vix': _safe_float(row.get('vix')),
-            # 신뢰도: target 컬럼이 있으면 활용 (예측 확률은 추후 모델에서 직접 저장)
             'confidence': None,
-            # 충족/미충족 조건 (추후 retrain_pipeline에서 채움)
             'conditions_met': [],
             'conditions_not_met': [],
             'feature_importance': [],
@@ -109,11 +107,13 @@ def _parse_date(val) -> datetime:
 
 
 def upload_to_mongo(docs: list, replace: bool = False):
-    """MongoDB total_trading_signals 컬렉션에 업로드"""
     load_dotenv()
-    client = MongoClient(os.getenv("MONGO_URI"))
-    db = client[os.getenv("MONGODB_DB", os.getenv("DB_NAME", "richclub"))]
-    col = db["total_trading_signals"]
+    uri = _get_mongo_uri()
+    db_name = _get_db_name()
+    logger.info(f"MongoDB 연결: {db_name}")
+
+    client = MongoClient(uri)
+    col = client[db_name]["total_trading_signals"]
 
     if replace:
         col.drop()
@@ -121,9 +121,8 @@ def upload_to_mongo(docs: list, replace: bool = False):
 
     if docs:
         result = col.insert_many(docs)
-        logger.info(f"업로드 완료: {len(result.inserted_ids)}건 → total_trading_signals")
+        logger.info(f"업로드 완료: {len(result.inserted_ids)}건 -> total_trading_signals")
 
-    # 인덱스 생성
     col.create_index([("stock_code", ASCENDING), ("predicted_at", ASCENDING)])
     col.create_index([("signal", ASCENDING)])
     col.create_index([("predicted_at", ASCENDING)])
@@ -131,6 +130,7 @@ def upload_to_mongo(docs: list, replace: bool = False):
 
 
 def run(csv_path: str = DEFAULT_CSV, replace: bool = False):
+    load_dotenv()
     logger.info(f"CSV 경로: {csv_path}")
     df = load_csv(csv_path)
     docs = preprocess(df)

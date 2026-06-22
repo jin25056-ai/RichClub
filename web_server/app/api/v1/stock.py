@@ -1,10 +1,5 @@
 """
 주식 관련 API
-- AI 예측 목록 (매수/매도/관망 태그)
-- RSI / MACD 차트 (total_trading_signals 기반 계산)
-- 캔들 차트 (5분봉 없으면 일봉으로 대체)
-- 종목 리스트 / 검색
-- AI 분석 상세 (매수 근거)
 """
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -16,12 +11,10 @@ from pydantic import BaseModel
 from app.core.dependencies import get_current_user
 from app.db.mongo import get_db
 from app.schemas.stock import (
-    AIPredictionItem,
-    AIDetailResponse,
+    AIPredictionItem, AIDetailResponse,
     MACDResponse, MACDDataPoint,
     RSIResponse, RSIDataPoint,
-    StockItem,
-    StockSearchResult,
+    StockItem, StockSearchResult,
 )
 
 router = APIRouter(prefix="/stock", tags=["stock"])
@@ -41,6 +34,9 @@ class CandleDataPoint(BaseModel):
     low: Optional[float]
     close: Optional[float]
     volume: Optional[float]
+    ma5: Optional[float] = None
+    ma20: Optional[float] = None
+    ma60: Optional[float] = None
 
 
 class CandleResponse(BaseModel):
@@ -50,10 +46,7 @@ class CandleResponse(BaseModel):
 
 
 @router.get("/list", response_model=List[StockItem], summary="종목 리스트")
-async def get_stock_list(
-    db: AsyncIOMotorDatabase = Depends(_db),
-    _: dict = Depends(get_current_user),
-):
+async def get_stock_list(db: AsyncIOMotorDatabase = Depends(_db), _: dict = Depends(get_current_user)):
     cursor = db.total_trading_signals.aggregate([
         {"$group": {"_id": "$stock_code", "stock_name": {"$first": "$stock_name"}}},
         {"$sort": {"_id": 1}},
@@ -66,19 +59,13 @@ async def get_stock_list(
 
 @router.get("/search", response_model=List[StockSearchResult], summary="종목 검색")
 async def search_stock(
-    q: str = Query(..., description="종목코드 또는 종목명 검색어"),
-    db: AsyncIOMotorDatabase = Depends(_db),
-    _: dict = Depends(get_current_user),
+    q: str = Query(...), db: AsyncIOMotorDatabase = Depends(_db), _: dict = Depends(get_current_user)
 ):
     cursor = db.total_trading_signals.aggregate([
-        {
-            "$match": {
-                "$or": [
-                    {"stock_code": {"$regex": q, "$options": "i"}},
-                    {"stock_name": {"$regex": q, "$options": "i"}},
-                ]
-            }
-        },
+        {"$match": {"$or": [
+            {"stock_code": {"$regex": q, "$options": "i"}},
+            {"stock_name": {"$regex": q, "$options": "i"}},
+        ]}},
         {"$group": {"_id": "$stock_code", "stock_name": {"$first": "$stock_name"}}},
         {"$sort": {"_id": 1}},
         {"$limit": 20},
@@ -91,7 +78,7 @@ async def search_stock(
 
 @router.get("/ai/predictions", response_model=List[AIPredictionItem], summary="AI 예측 목록")
 async def get_ai_predictions(
-    signal: Optional[str] = Query(None, description="매수 / 매도 / 관망 필터"),
+    signal: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
@@ -99,7 +86,6 @@ async def get_ai_predictions(
     query: dict = {}
     if signal in ("매수", "매도", "관망"):
         query["signal"] = signal
-
     cursor = db.total_trading_signals.find(query).sort("predicted_at", -1).limit(limit)
     result = []
     async for doc in cursor:
@@ -119,44 +105,28 @@ async def get_ai_predictions(
 
 @router.get("/ai/detail/{stock_code}", response_model=AIDetailResponse, summary="AI 분석 상세")
 async def get_ai_detail(
-    stock_code: str,
-    db: AsyncIOMotorDatabase = Depends(_db),
-    _: dict = Depends(get_current_user),
+    stock_code: str, db: AsyncIOMotorDatabase = Depends(_db), _: dict = Depends(get_current_user)
 ):
-    doc = await db.total_trading_signals.find_one(
-        {"stock_code": stock_code},
-        sort=[("predicted_at", -1)]
-    )
+    doc = await db.total_trading_signals.find_one({"stock_code": stock_code}, sort=[("predicted_at", -1)])
     if not doc:
         raise HTTPException(status_code=404, detail="해당 종목의 AI 예측 결과가 없습니다.")
 
     feature_importance = doc.get("feature_importance", [])
     if not feature_importance:
-        # feature_importance 없으면 지표값을 상대적 중요도 형태로 구성
-        fi_fields = {
-            "rsi": "RSI",
-            "macd": "MACD",
-            "stoch_k": "스토캐스틱 K",
-            "stoch_d": "스토캐스틱 D",
-            "ma5_20_ratio": "5/20일선 비율",
-            "ma20_60_ratio": "20/60일선 비율",
-            "close_ma60_ratio": "종가/60일선 비율",
-            "vix_value": "VIX",
-        }
+        fi_fields = {"rsi": "RSI", "macd": "MACD", "stoch_k": "스토캐스틱 K", "stoch_d": "스토캐스틱 D",
+                     "ma5_20_ratio": "5/20일선 비율", "ma20_60_ratio": "20/60일선 비율",
+                     "close_ma60_ratio": "종가/60일선 비율", "vix_value": "VIX"}
         for f, label in fi_fields.items():
             if f in doc and doc[f] is not None:
                 feature_importance.append({
-                    "feature": label,
-                    "importance": None,
+                    "feature": label, "importance": None,
                     "value": round(float(doc[f]), 4),
                     "direction": "positive" if float(doc[f]) > 0 else "negative"
                 })
 
     return AIDetailResponse(
-        stock_code=stock_code,
-        stock_name=doc.get("stock_name", ""),
-        signal=doc.get("signal", "관망"),
-        confidence=doc.get("confidence"),
+        stock_code=stock_code, stock_name=doc.get("stock_name", ""),
+        signal=doc.get("signal", "관망"), confidence=doc.get("confidence"),
         feature_importance=feature_importance,
         conditions_met=doc.get("conditions_met", []),
         conditions_not_met=doc.get("conditions_not_met", []),
@@ -166,79 +136,62 @@ async def get_ai_detail(
 
 @router.get("/chart/rsi/{stock_code}", response_model=RSIResponse, summary="RSI 차트 데이터")
 async def get_rsi(
-    stock_code: str,
-    period: str = Query("3m", description="기간: 1m / 3m / 6m"),
-    db: AsyncIOMotorDatabase = Depends(_db),
-    _: dict = Depends(get_current_user),
+    stock_code: str, period: str = Query("3m"),
+    db: AsyncIOMotorDatabase = Depends(_db), _: dict = Depends(get_current_user)
 ):
     if period not in PERIOD_DAYS:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m 중 하나여야 합니다.")
-
     days = PERIOD_DAYS[period]
     since = datetime.utcnow() - timedelta(days=days + 20)
-
     cursor = db.total_trading_signals.find(
         {"stock_code": stock_code, "predicted_at": {"$gte": since}},
         {"predicted_at": 1, "close": 1, "rsi": 1, "stock_name": 1, "_id": 0}
     ).sort("predicted_at", 1)
-
     docs = [doc async for doc in cursor]
     if not docs:
         raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
-
     stock_name = docs[0].get("stock_name", "")
     cutoff = datetime.utcnow() - timedelta(days=days)
     data = []
-
     has_rsi = any(d.get("rsi") is not None for d in docs)
     if has_rsi:
         for d in docs:
             dt = d["predicted_at"]
             dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
             if dt_naive >= cutoff and d.get("rsi") is not None:
-                date_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
-                data.append(RSIDataPoint(date=date_str, rsi=round(float(d["rsi"]), 2)))
+                data.append(RSIDataPoint(date=dt.strftime("%Y-%m-%d"), rsi=round(float(d["rsi"]), 2)))
     else:
         closes = [float(d["close"]) for d in docs if d.get("close")]
         dates = [d["predicted_at"] for d in docs if d.get("close")]
-        rsi_values = _calc_rsi(closes, window=14)
+        rsi_values = _calc_rsi(closes)
         for i, dt in enumerate(dates):
             dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
             if dt_naive >= cutoff and rsi_values[i] is not None:
                 data.append(RSIDataPoint(date=dt.strftime("%Y-%m-%d"), rsi=round(rsi_values[i], 2)))
-
     return RSIResponse(stock_code=stock_code, stock_name=stock_name, period=period, data=data)
 
 
 @router.get("/chart/macd/{stock_code}", response_model=MACDResponse, summary="MACD 차트 데이터")
 async def get_macd(
-    stock_code: str,
-    period: str = Query("3m", description="기간: 1m / 3m / 6m"),
-    db: AsyncIOMotorDatabase = Depends(_db),
-    _: dict = Depends(get_current_user),
+    stock_code: str, period: str = Query("3m"),
+    db: AsyncIOMotorDatabase = Depends(_db), _: dict = Depends(get_current_user)
 ):
     if period not in PERIOD_DAYS:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m 중 하나여야 합니다.")
-
     days = PERIOD_DAYS[period]
     since = datetime.utcnow() - timedelta(days=days + 40)
-
     cursor = db.total_trading_signals.find(
         {"stock_code": stock_code, "predicted_at": {"$gte": since}},
         {"predicted_at": 1, "close": 1, "macd": 1, "stock_name": 1, "_id": 0}
     ).sort("predicted_at", 1)
-
     docs = [doc async for doc in cursor]
     if not docs:
         raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
-
     stock_name = docs[0].get("stock_name", "")
     cutoff = datetime.utcnow() - timedelta(days=days)
-
     closes = [float(d["close"]) for d in docs if d.get("close")]
     dates = [d["predicted_at"] for d in docs if d.get("close")]
     macd_line, signal_line, histogram = _calc_macd(closes)
-
     data = []
     for i, dt in enumerate(dates):
         dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
@@ -249,20 +202,19 @@ async def get_macd(
                 signal=round(signal_line[i], 4),
                 histogram=round(histogram[i], 4),
             ))
-
     return MACDResponse(stock_code=stock_code, stock_name=stock_name, period=period, data=data)
 
 
 @router.get("/chart/candle/{stock_code}", response_model=CandleResponse, summary="캔들 차트 데이터")
 async def get_candles(
     stock_code: str,
-    days: int = Query(30, ge=1, le=180, description="조회 일수 (최대 180일)"),
+    days: int = Query(30, ge=1, le=180),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
     since = datetime.utcnow() - timedelta(days=days)
 
-    # 1. 5분봉 먼저 시도
+    # 5분봉 먼저 시도
     cursor = db.candles_5m.find(
         {"stock_code": stock_code, "datetime": {"$gte": since}},
         {"_id": 0, "datetime": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
@@ -281,10 +233,11 @@ async def get_candles(
             ))
         return CandleResponse(stock_code=stock_code, interval="5m", data=data)
 
-    # 2. 5분봉 없으면 total_trading_signals의 일봉으로 대체
+    # 5분봉 없으면 total_trading_signals 일봉 + 이동평균 포함
     cursor = db.total_trading_signals.find(
         {"stock_code": stock_code, "predicted_at": {"$gte": since}},
-        {"_id": 0, "predicted_at": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+        {"_id": 0, "predicted_at": 1, "open": 1, "high": 1, "low": 1, "close": 1,
+         "volume": 1, "ma5": 1, "ma20": 1, "ma60": 1}
     ).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]
 
@@ -299,6 +252,9 @@ async def get_candles(
             datetime=dt_str,
             open=d.get("open"), high=d.get("high"),
             low=d.get("low"), close=d.get("close"), volume=d.get("volume"),
+            ma5=round(float(d["ma5"]), 0) if d.get("ma5") else None,
+            ma20=round(float(d["ma20"]), 0) if d.get("ma20") else None,
+            ma60=round(float(d["ma60"]), 0) if d.get("ma60") else None,
         ))
 
     return CandleResponse(stock_code=stock_code, interval="1d", data=data)
