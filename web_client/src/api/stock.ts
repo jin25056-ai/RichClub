@@ -74,9 +74,9 @@ export const stockApi = {
     apiClient.get<StockItem[]>('/api/v1/stock/search', { params: { q } }),
 
   // AI 예측 목록
-  getPredictions: (signal?: string, limit = 50) =>
+  getPredictions: (signal?: string, limit = 50, stock_name?: string) =>
     apiClient.get<AIPredictionItem[]>('/api/v1/stock/ai/predictions', {
-      params: { signal, limit },
+      params: { signal, limit, stock_name },
     }),
 
   // AI 분석 상세
