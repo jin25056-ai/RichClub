@@ -2,7 +2,7 @@
 주식 관련 API
 - AI 예측 목록 (매수/매도/관망 태그)
 - RSI / MACD 차트 (total_trading_signals 기반 계산)
-- 5분봉 차트
+- 캔들 차트 (5분봉 없으면 일봉으로 대체)
 - 종목 리스트 / 검색
 - AI 분석 상세 (매수 근거)
 """
@@ -46,7 +46,7 @@ class CandleDataPoint(BaseModel):
 
 class CandleResponse(BaseModel):
     stock_code: str
-    interval: str
+    interval: str   # "5m" 또는 "1d"
     data: List[CandleDataPoint]
 
 
@@ -159,7 +159,7 @@ async def get_ai_detail(
     )
 
 
-# ── RSI 차트 (total_trading_signals 기반) ──────────────────────────────────────
+# ── RSI 차트 ───────────────────────────────────────────────────────────────────
 @router.get("/chart/rsi/{stock_code}", response_model=RSIResponse, summary="RSI 차트 데이터")
 async def get_rsi(
     stock_code: str,
@@ -173,7 +173,6 @@ async def get_rsi(
     days = PERIOD_DAYS[period]
     since = datetime.utcnow() - timedelta(days=days + 20)
 
-    # total_trading_signals에서 종목의 날짜별 close + rsi 조회
     cursor = db.total_trading_signals.find(
         {"stock_code": stock_code, "predicted_at": {"$gte": since}},
         {"predicted_at": 1, "close": 1, "rsi": 1, "stock_name": 1, "_id": 0}
@@ -187,7 +186,6 @@ async def get_rsi(
     cutoff = datetime.utcnow() - timedelta(days=days)
     data = []
 
-    # rsi 컬럼이 있으면 그대로 사용, 없으면 close로 계산
     has_rsi = any(d.get("rsi") is not None for d in docs)
 
     if has_rsi:
@@ -209,7 +207,7 @@ async def get_rsi(
     return RSIResponse(stock_code=stock_code, stock_name=stock_name, period=period, data=data)
 
 
-# ── MACD 차트 (total_trading_signals 기반) ─────────────────────────────────────
+# ── MACD 차트 ──────────────────────────────────────────────────────────────────
 @router.get("/chart/macd/{stock_code}", response_model=MACDResponse, summary="MACD 차트 데이터")
 async def get_macd(
     stock_code: str,
@@ -253,8 +251,8 @@ async def get_macd(
     return MACDResponse(stock_code=stock_code, stock_name=stock_name, period=period, data=data)
 
 
-# ── 5분봉 차트 ─────────────────────────────────────────────────────────────────
-@router.get("/chart/candle/{stock_code}", response_model=CandleResponse, summary="5분봉 차트 데이터")
+# ── 캔들 차트 (5분봉 없으면 일봉으로 대체) ────────────────────────────────────
+@router.get("/chart/candle/{stock_code}", response_model=CandleResponse, summary="캔들 차트 데이터")
 async def get_candles(
     stock_code: str,
     days: int = Query(1, ge=1, le=30, description="조회 일수 (최대 30일)"),
@@ -263,26 +261,47 @@ async def get_candles(
 ):
     since = datetime.utcnow() - timedelta(days=days)
 
+    # 1. 5분봉 먼저 시도
     cursor = db.candles_5m.find(
         {"stock_code": stock_code, "datetime": {"$gte": since}},
         {"_id": 0, "datetime": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
     ).sort("datetime", 1)
-
     docs = [doc async for doc in cursor]
+
+    if docs:
+        data = []
+        for d in docs:
+            dt = d["datetime"]
+            dt_str = dt.strftime("%Y-%m-%d %H:%M") if hasattr(dt, "strftime") else str(dt)
+            data.append(CandleDataPoint(
+                datetime=dt_str,
+                open=d.get("open"), high=d.get("high"),
+                low=d.get("low"), close=d.get("close"), volume=d.get("volume"),
+            ))
+        return CandleResponse(stock_code=stock_code, interval="5m", data=data)
+
+    # 2. 5분봉 없으면 total_trading_signals의 일봉으로 대체
+    since_daily = datetime.utcnow() - timedelta(days=max(days, 30))
+    cursor = db.total_trading_signals.find(
+        {"stock_code": stock_code, "predicted_at": {"$gte": since_daily}},
+        {"_id": 0, "predicted_at": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+    ).sort("predicted_at", 1)
+    docs = [doc async for doc in cursor]
+
     if not docs:
-        raise HTTPException(status_code=404, detail="5분봉 데이터가 없습니다. 장 중에 수집됩니다.")
+        raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
 
     data = []
     for d in docs:
-        dt = d["datetime"]
-        dt_str = dt.strftime("%Y-%m-%d %H:%M") if hasattr(dt, "strftime") else str(dt)
+        dt = d["predicted_at"]
+        dt_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
         data.append(CandleDataPoint(
             datetime=dt_str,
             open=d.get("open"), high=d.get("high"),
             low=d.get("low"), close=d.get("close"), volume=d.get("volume"),
         ))
 
-    return CandleResponse(stock_code=stock_code, interval="5m", data=data)
+    return CandleResponse(stock_code=stock_code, interval="1d", data=data)
 
 
 # ── 내부 계산 함수 ─────────────────────────────────────────────────────────────
