@@ -231,7 +231,7 @@ async def get_win_rate(
 
     query: dict = {"predicted_at": {"$gte": since}}
     if stock_code:
-        query["stock_code"] = stock_code
+        query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
 
     cursor = db.total_trading_signals.find(query).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]

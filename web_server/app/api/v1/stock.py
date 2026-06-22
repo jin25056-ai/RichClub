@@ -55,8 +55,12 @@ def _safe_float(v):
     try:
         f = float(v)
         return None if f != f else round(f, 2)
-    except:
+    except Exception:
         return None
+
+
+def _is_code(s: str) -> bool:
+    return bool(re.match(r'^\d{6}$', s))
 
 
 def _calc_rsi(closes: list, window: int = 14) -> list:
@@ -162,7 +166,6 @@ async def get_ai_detail(
     doc = await db.total_trading_signals.find_one({"stock_code": stock_code}, sort=[("predicted_at", -1)])
     if not doc:
         raise HTTPException(status_code=404, detail="해당 종목의 AI 예측 결과가 없습니다.")
-
     feature_importance = doc.get("feature_importance", [])
     if not feature_importance:
         fi_fields = {"rsi": "RSI", "macd": "MACD", "stoch_k": "스토캐스틱 K", "stoch_d": "스토캐스틱 D",
@@ -175,7 +178,6 @@ async def get_ai_detail(
                     "value": round(float(doc[f]), 4),
                     "direction": "positive" if float(doc[f]) > 0 else "negative"
                 })
-
     return AIDetailResponse(
         stock_code=stock_code, stock_name=doc.get("stock_name", ""),
         signal=doc.get("signal", "관망"), confidence=doc.get("confidence"),
@@ -284,9 +286,9 @@ async def get_candles(
             ))
         return CandleResponse(stock_code=stock_code, interval="5m", data=data)
 
-    # 2) DB 일봉 (stock_name 기준 조회, daily_collect로 채워진 데이터)
+    # 2) DB 일봉 - stock_code 또는 stock_name 둘 다 시도
     cursor = db.total_trading_signals.find(
-        {"stock_name": stock_code, "predicted_at": {"$gte": since}},
+        {"$or": [{"stock_code": stock_code}, {"stock_name": stock_code}], "predicted_at": {"$gte": since}},
         {"_id": 0, "predicted_at": 1, "open": 1, "high": 1, "low": 1, "close": 1,
          "volume": 1, "ma5": 1, "ma20": 1, "ma60": 1}
     ).sort("predicted_at", 1)
@@ -308,23 +310,18 @@ async def get_candles(
         return CandleResponse(stock_code=stock_code, interval="1d", data=data)
 
     # 3) DB 데이터 부족 → yfinance 직접 수집
-    # stock_name으로 종목코드 조회
-    doc_info = await db.total_trading_signals.find_one(
-        {"stock_name": stock_code}, {"stock_code": 1}
-    )
-    code_str = doc_info.get("stock_code", "") if doc_info else ""
-
-    if not re.match(r'^\d{6}$', code_str):
-        # stock_code 필드로 재시도
-        doc_info2 = await db.total_trading_signals.find_one(
-            {"stock_code": stock_code}, {"stock_code": 1}
+    # stock_code가 6자리 숫자면 바로 티커로 사용, 아니면 DB에서 조회
+    if _is_code(stock_code):
+        ticker_code = stock_code
+    else:
+        doc_info = await db.total_trading_signals.find_one(
+            {"stock_name": stock_code}, {"stock_code": 1}
         )
-        if doc_info2 and re.match(r'^\d{6}$', doc_info2.get("stock_code", "")):
-            code_str = doc_info2["stock_code"]
-        else:
+        ticker_code = doc_info.get("stock_code", "") if doc_info else ""
+        if not _is_code(ticker_code):
             raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
 
-    ticker = code_str + ".KS"
+    ticker = ticker_code + ".KS"
     buf_days = days + 70
     start_str = (datetime.utcnow() - timedelta(days=buf_days)).strftime("%Y-%m-%d")
     end_str = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -339,12 +336,10 @@ async def get_candles(
         raw = raw.rename(columns={"adj close": "close"})
         raw.index = pd.to_datetime(raw.index)
         raw = raw.dropna(subset=["close"])
-
         close = raw["close"]
-        ma5  = close.rolling(5).mean()
+        ma5 = close.rolling(5).mean()
         ma20 = close.rolling(20).mean()
         ma60 = close.rolling(60).mean()
-
         cutoff = datetime.utcnow() - timedelta(days=days)
         result = []
         for dt, row in raw.iterrows():
