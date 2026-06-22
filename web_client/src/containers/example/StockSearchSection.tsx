@@ -285,15 +285,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           };
         }).filter((d) => d.datetime >= cutStr);
 
-        const lastDate = trimmed.length ? trimmed[trimmed.length - 1].datetime : '';
-        const futurePadding = Array.from({ length: FUTURE_POINTS }, (_, i) => {
-          const futureDate = addDays(lastDate, i + 1);
-          const srcIdx = sorted.length - FUTURE_POINTS + i;
-          const ichi = srcIdx >= 0 ? ichimokuRaw[srcIdx] : null;
-          return { datetime: futureDate, spanA: ichi?.spanA ?? null, spanB: ichi?.spanB ?? null };
-        });
-
-        setChartData([...trimmed, ...futurePadding]);
+        // futurePadding 제거 - finalData에서 처리
 
         // AI 신호를 chartData에 직접 합치기
         const sigMap: Record<string, string> = {};
@@ -301,10 +293,14 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           const date = (d.predicted_at || '').slice(0, 10);
           if (date >= cutStr) sigMap[date] = d.signal;
         });
-        setChartData((prev) => prev.map((d) => ({
+
+        // 미래 패딩 제거 - 선행스팬은 데이터 마지막 날까지만 표시
+        const finalData = [...trimmed].map((d) => ({
           ...d,
           aiSignal: sigMap[d.datetime] ?? null,
-        })));
+        }));
+
+        setChartData(finalData);
         setSignals([]);
       })
       .catch(() => setError('데이터를 불러오지 못했습니다.'))
