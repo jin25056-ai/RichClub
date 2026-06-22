@@ -1,6 +1,10 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth
+from app.api.v1 import auth, stock, trade_log, market, watchlist
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth.router)
+router.include_router(stock.router)
+router.include_router(trade_log.router)
+router.include_router(market.router)
+router.include_router(watchlist.router)

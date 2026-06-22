@@ -1,0 +1,75 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = "efforthye/richclub-api"
+        CONTAINER_NAME = "richclub-api"
+        APP_PORT = "8000"
+        ENV_FILE = "/var/jenkins_home/.env"
+        HOST_IP = "192.168.219.100"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ./web_server"
+                sh "docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest"
+            }
+        }
+
+        stage('Push to DockerHub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-credentials',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
+                    sh "docker push ${IMAGE_NAME}:${BUILD_NUMBER}"
+                    sh "docker push ${IMAGE_NAME}:latest"
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh """
+                    docker stop ${CONTAINER_NAME} || true
+                    docker rm ${CONTAINER_NAME} || true
+                    docker run -d \\
+                        --name ${CONTAINER_NAME} \\
+                        --restart unless-stopped \\
+                        -p ${APP_PORT}:8000 \\
+                        --env-file ${ENV_FILE} \\
+                        ${IMAGE_NAME}:latest
+                """
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                sh "sleep 5"
+                sh "curl -f http://${HOST_IP}:${APP_PORT}/health || exit 1"
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "배포 성공: ${IMAGE_NAME}:${BUILD_NUMBER}"
+        }
+        failure {
+            echo "배포 실패"
+            sh "docker stop ${CONTAINER_NAME} || true"
+        }
+        always {
+            sh "docker image prune -f"
+        }
+    }
+}

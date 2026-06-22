@@ -339,7 +339,7 @@ else:
 
                 reason = "익절" if is_take_profit else ("손절" if is_stop_loss else "데드크로스")
                 print(
-                    f"🔴 [{current_date}] SELL ({reason}) | {stock_name} | 매도가: {current_price:,}원 | 수익률: {profit_rate:+.2f}%")
+                    f"🔴 [{current_date}] SELL ({reason}) | {stock_name} | 매도가: {int(current_price):,}원 | 수익률: {profit_rate:+.2f}%")
 
                 # 보유 목록에서 삭제
                 del active_positions[stock_name]
@@ -352,7 +352,7 @@ else:
 
             qty = invest_amount / current_price
             active_positions[stock_name] = {'buy_price': current_price, 'qty': qty}
-            print(f"🟩 [{current_date}] BUY  | {stock_name} | 매수가: {current_price:,}원 | 투자금: {int(invest_amount):,}원")
+            print(f"🟩 [{current_date}] BUY  | {stock_name} | 매수가: {int(current_price):,}원 | 투자금: {int(invest_amount):,}원")
 
         # 3) 매일 종가 기준 총 자산 가치(현금 + 현재 보유 주식 가치) 계산
         current_portfolio_value = balance
