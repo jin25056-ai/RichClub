@@ -9,7 +9,6 @@ RichClub/
   web_server/      # FastAPI 백엔드
   web_client/      # React + TypeScript 프론트엔드
   docker-compose.yml
-  .github/workflows/
 ```
 
 ## 시스템 구성도
@@ -30,9 +29,13 @@ RichClub/
 | refresh_token | 14일 | access_token 재발급 |
 
 ### API 인증 방식
+Bearer 토큰 또는 HttpOnly 쿠키 둘 다 지원
+
 ```
 Authorization: Bearer <access_token>
 ```
+
+또는 로그인 시 자동으로 설정되는 쿠키 사용 (프론트에서 `credentials: 'include'` 또는 axios `withCredentials: true` 필요)
 
 ### 엔드포인트
 | 메서드 | 경로 | 설명 |
@@ -40,6 +43,7 @@ Authorization: Bearer <access_token>
 | POST | /api/v1/auth/signup | 회원가입 |
 | POST | /api/v1/auth/login | 로그인 |
 | POST | /api/v1/auth/refresh | 토큰 재발급 |
+| POST | /api/v1/auth/logout | 로그아웃 (쿠키 삭제) |
 | GET | /api/v1/auth/me | 내 정보 조회 |
 
 ### MongoDB users 컬렉션 구조
@@ -114,17 +118,86 @@ docker compose up -d
 
 ---
 
+## 배포 환경
+
+### 인프라 구성
+- 서버: Mac M1 Mini (홈 서버)
+- 외부 접근: Cloudflare Tunnel
+- 컨테이너: Docker + colima (Mac ARM64)
+
+### 서비스 주소
+| 서비스 | 주소 |
+|---|---|
+| API 서버 | https://richclub.efforthye.dev |
+| API 문서 | https://richclub.efforthye.dev/docs |
+| Jenkins | https://jenkins.efforthye.dev |
+
+### Docker 이미지
+- DockerHub: `efforthye/richclub-api:latest`
+- 멀티 플랫폼 빌드: `linux/amd64`, `linux/arm64`
+
+### 수동 빌드 및 배포 (Windows)
+
+```powershell
+cd web_server
+
+# 멀티 플랫폼 빌드 및 DockerHub 푸시
+docker buildx build --platform linux/amd64,linux/arm64 -t efforthye/richclub-api:latest --push .
+```
+
+### Mac M1 미니에서 수동 재배포
+
+```bash
+docker pull efforthye/richclub-api:latest
+docker stop richclub-api
+docker rm richclub-api
+docker run -d \
+  --name richclub-api \
+  --restart unless-stopped \
+  -p 8000:8000 \
+  --env-file /Users/nadeko/Desktop/programs/study/RichClub/web_server/.env \
+  efforthye/richclub-api:latest
+```
+
+---
+
 ## CI/CD
 
-GitHub Actions 사용. GitHub Secrets 설정 필요:
+Jenkins + Poll SCM 방식으로 자동 배포
 
-| Secret | 설명 |
-|---|---|
-| DOCKERHUB_USERNAME | Docker Hub 계정 |
-| DOCKERHUB_TOKEN | Docker Hub 액세스 토큰 |
-| DEPLOY_HOST | 배포 서버 IP |
-| DEPLOY_USER | 배포 서버 SSH 사용자 |
-| DEPLOY_SSH_KEY | 배포 서버 SSH 개인키 |
+### 흐름
 
-- `main` 브랜치 push: 테스트 + Docker 빌드 + 서버 자동 배포
-- PR: 테스트만 실행
+```
+코드 수정
+    ↓
+git push (efforthye 브랜치)
+    ↓
+Jenkins Poll SCM (1분마다 감지)
+    ↓
+Docker 빌드
+    ↓
+DockerHub push (efforthye/richclub-api)
+    ↓
+기존 컨테이너 교체 배포
+    ↓
+https://richclub.efforthye.dev 에 반영
+```
+
+### Jenkins Credentials 설정
+| ID | Kind | 설명 |
+|---|---|---|
+| github-token | Secret text | GitHub Personal Access Token |
+| dockerhub-credentials | Username with password | DockerHub 계정 및 토큰 |
+
+### Cloudflare Tunnel 서비스 등록 (Mac M1 미니)
+
+```bash
+# 서비스 설치 (재부팅 시 자동 실행)
+sudo cloudflared service install
+
+# 서비스 상태 확인
+sudo launchctl list | grep cloudflared
+
+# 로그 확인
+sudo cat /Library/Logs/com.cloudflare.cloudflared.err.log | tail -20
+```
