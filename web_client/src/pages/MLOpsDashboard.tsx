@@ -86,6 +86,12 @@ const MLOpsDashboard: React.FC = () => {
 
   const isLoggedIn = !!localStorage.getItem('access_token');
 
+  useEffect(() => {
+    if (!isLoggedIn) {
+      window.location.href = '/auth';
+    }
+  }, [isLoggedIn]);
+
   const load = useCallback(async () => {
     if (!isLoggedIn) return;
     setLoading(true);
