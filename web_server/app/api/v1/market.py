@@ -165,6 +165,30 @@ def _calc_invest_signal(items: List[GlobalMarketItem]) -> tuple:
             score -= 1
             reasons.append(f"WTI 원유 {wti.change_pct:.1f}% 급등")
 
+    sp500 = item_map.get("^GSPC")
+    if sp500 and sp500.change_pct is not None:
+        if sp500.change_pct >= 1.0:
+            score += 1
+            reasons.append(f"S&P500 +{sp500.change_pct:.1f}% 상승")
+        elif sp500.change_pct <= -1.0:
+            score -= 1
+            reasons.append(f"S&P500 {sp500.change_pct:.1f}% 하락")
+
+    sox = item_map.get("^SOX")
+    if sox and sox.change_pct is not None:
+        if sox.change_pct >= 2.0:
+            score += 1
+            reasons.append(f"필라델피아 반도체 +{sox.change_pct:.1f}% 상승")
+        elif sox.change_pct <= -2.0:
+            score -= 1
+            reasons.append(f"필라델피아 반도체 {sox.change_pct:.1f}% 하락")
+
+    gold = item_map.get("GC=F")
+    if gold and gold.change_pct is not None:
+        if gold.change_pct >= 1.0:
+            score -= 1
+            reasons.append(f"금 +{gold.change_pct:.1f}% 급등 (위험회피)")
+
     if score >= 2:
         signal = "매수 우호"
     elif score <= -2:
