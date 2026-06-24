@@ -187,10 +187,14 @@ async def evaluate_predictions(db: AsyncIOMotorDatabase):
             )
             if raw.empty:
                 continue
+            # yfinance 버전에 따라 MultiIndex 처리
             if isinstance(raw.columns, pd.MultiIndex):
-                raw.columns = raw.columns.droplevel(1)
+                raw = raw.xs(ticker, axis=1, level=1) if ticker in raw.columns.get_level_values(1) else raw.droplevel(1, axis=1)
             raw.columns = [c.lower() for c in raw.columns]
-            future_close = float(raw['close'].iloc[0])
+            if 'close' not in raw.columns:
+                logger.warning(f"{ticker} close 컬럼 없음: {list(raw.columns)}")
+                continue
+            future_close = float(raw['close'].dropna().iloc[0])
 
             for doc in group_docs:
                 close_at_pred = doc['close_at_prediction']
