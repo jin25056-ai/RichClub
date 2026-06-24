@@ -124,6 +124,12 @@ export const marketApi = {
   getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate', { params }),
 
+
+  getWinRateCombined: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
+    apiClient.get<WinRateResponse>('/api/v1/market/winrate/combined', { params }),
+
+  getWinRateIndicator: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
+    apiClient.get<WinRateResponse>('/api/v1/market/winrate/indicator', { params }),
   getWinRateSimple: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/simple', { params }),
 };
