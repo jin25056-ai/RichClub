@@ -234,13 +234,12 @@ async def get_stock_performance(
             'win': len(win),
             'accuracy': round(len(win) / len(realized) * 100, 1) if realized else 0,
             'avg_ret': round(sum(realized) / len(realized), 2) if realized else 0,
-            'cumulative_ret': round((cumulative - 1) * 100, 2) if realized else 0,
             'max_ret': round(max(realized), 2) if realized else 0,
             'min_ret': round(min(realized), 2) if realized else 0,
             'unrealized_pct': unrealized_pct,
         })
 
-    result.sort(key=lambda x: x['cumulative_ret'], reverse=True)
+    result.sort(key=lambda x: x['avg_ret'], reverse=True)
     return result[:100]
 async def trigger_calculate_returns(
     background_tasks: BackgroundTasks,

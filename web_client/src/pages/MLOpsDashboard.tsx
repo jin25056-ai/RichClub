@@ -17,7 +17,7 @@ interface StockPerf {
   win: number;
   accuracy: number;
   avg_ret: number;
-  cumulative_ret: number;
+  cumulative_ret?: number;
   max_ret: number;
   min_ret: number;
   unrealized_pct: number | null;
@@ -304,7 +304,7 @@ const MLOpsDashboard: React.FC = () => {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                 <thead>
                   <tr style={{ color: '#555', borderBottom: '1px solid #1e1e2e' }}>
-                    {['종목', '거래', '승률', '평균', '누적', '최대', '최소', '미실현'].map(h => (
+                    {['종목', '거래', '승률', '평균', '최대', '최소', '미실현'].map(h => (
                       <th key={h} style={{ textAlign: 'left', padding: '3px 5px', fontWeight: 500 }}>{h}</th>
                     ))}
                   </tr>
@@ -315,8 +315,7 @@ const MLOpsDashboard: React.FC = () => {
                       <td style={{ padding: '3px 5px', color: '#d1d5db' }}>{s.stock_name}</td>
                       <td style={{ padding: '3px 5px', color: '#6b7280' }}>{s.win}/{s.total}</td>
                       <td style={{ padding: '3px 5px', color: s.accuracy >= 60 ? '#16a34a' : s.accuracy >= 50 ? '#d97706' : '#dc2626' }}>{s.accuracy.toFixed(0)}%</td>
-                      <td style={{ padding: '3px 5px' }}>{fmtRet(s.avg_ret)}</td>
-                      <td style={{ padding: '3px 5px', fontWeight: 600 }}>{fmtRet(s.cumulative_ret)}</td>
+                      <td style={{ padding: '3px 5px', fontWeight: 600 }}>{fmtRet(s.avg_ret)}</td>
                       <td style={{ padding: '3px 5px' }}>{fmtRet(s.max_ret)}</td>
                       <td style={{ padding: '3px 5px' }}>{fmtRet(s.min_ret)}</td>
                       <td style={{ padding: '3px 5px', color: '#4b5563' }}>{s.unrealized_pct != null ? fmtRet(s.unrealized_pct) : '-'}</td>
