@@ -91,17 +91,17 @@ async def get_signal_stats(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """기간별 신호 성능 통계 (total_trading_signals 직접 집계)"""
+    """매수→매도 실현 수익률 기반 기간별 성능"""
     since = datetime.utcnow() - timedelta(days=days)
     pipeline = [
-        {'$match': {'ret_5d': {'$ne': None}, 'predicted_at': {'$gte': since}}},
+        {'$match': {'signal': '매수', 'ret_realized': {'$ne': None}, 'predicted_at': {'$gte': since}}},
         {'$group': {
-            '_id': '$signal',
+            '_id': None,
             'total': {'$sum': 1},
-            'correct': {'$sum': {'$cond': ['$is_correct_5d', 1, 0]}},
-            'avg_ret_1d': {'$avg': '$ret_1d'},
-            'avg_ret_5d': {'$avg': '$ret_5d'},
-            'avg_ret_20d': {'$avg': '$ret_20d'},
+            'correct': {'$sum': {'$cond': ['$is_correct', 1, 0]}},
+            'avg_ret': {'$avg': '$ret_realized'},
+            'max_ret': {'$max': '$ret_realized'},
+            'min_ret': {'$min': '$ret_realized'},
         }},
     ]
     result = []
@@ -109,15 +109,14 @@ async def get_signal_stats(
         total = row['total']
         correct = row['correct']
         result.append({
-            'signal': row['_id'],
             'total': total,
             'correct': correct,
             'accuracy': round(correct / total * 100, 1) if total > 0 else 0,
-            'avg_ret_1d': round(row.get('avg_ret_1d') or 0, 2),
-            'avg_ret_5d': round(row.get('avg_ret_5d') or 0, 2),
-            'avg_ret_20d': round(row.get('avg_ret_20d') or 0, 2),
+            'avg_ret': round(row.get('avg_ret') or 0, 2),
+            'max_ret': round(row.get('max_ret') or 0, 2),
+            'min_ret': round(row.get('min_ret') or 0, 2),
         })
-    return result
+    return result[0] if result else {'total': 0, 'correct': 0, 'accuracy': 0, 'avg_ret': 0, 'max_ret': 0, 'min_ret': 0}
 
 
 @router.get("/recent-signals")
