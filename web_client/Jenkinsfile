@@ -2,12 +2,10 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "efforthye/richclub-api"
-        CONTAINER_NAME = "richclub-api"
-        APP_PORT = "8000"
-        ENV_FILE = "/var/jenkins_home/.env"
+        IMAGE_NAME = "efforthye/richclub-front"
+        CONTAINER_NAME = "richclub-front"
+        APP_PORT = "3000"
         HOST_IP = "192.168.219.100"
-        MODEL_VOLUME = "/Users/nadeko/models:/app/models"
     }
 
     stages {
@@ -19,7 +17,7 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ./web_server"
+                sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ./web_client"
                 sh "docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest"
             }
         }
@@ -46,9 +44,7 @@ pipeline {
                     docker run -d \\
                         --name ${CONTAINER_NAME} \\
                         --restart unless-stopped \\
-                        -p ${APP_PORT}:8000 \\
-                        -v ${MODEL_VOLUME} \\
-                        --env-file ${ENV_FILE} \\
+                        -p ${APP_PORT}:80 \\
                         ${IMAGE_NAME}:latest
                 """
             }
@@ -57,17 +53,17 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh "sleep 5"
-                sh "curl -f http://${HOST_IP}:${APP_PORT}/health || exit 1"
+                sh "curl -f http://${HOST_IP}:${APP_PORT} || exit 1"
             }
         }
     }
 
     post {
         success {
-            echo "배포 성공: ${IMAGE_NAME}:${BUILD_NUMBER}"
+            echo "프론트 배포 성공: ${IMAGE_NAME}:${BUILD_NUMBER}"
         }
         failure {
-            echo "배포 실패"
+            echo "프론트 배포 실패"
             sh "docker stop ${CONTAINER_NAME} || true"
         }
         always {

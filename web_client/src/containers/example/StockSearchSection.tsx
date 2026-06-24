@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Bar, Cell, Legend,
 } from 'recharts';
 import { stockApi, StockItem } from '../../api/stock';
@@ -12,15 +12,13 @@ const SYNC_ID = 'stock-sync';
 const MARGIN = { left: 0, right: 10, top: 4, bottom: 0 };
 const PERIOD_EXTRA = 60;
 const ICHIMOKU_SHIFT = 26;
-const FUTURE_POINTS = 10;
 
 const getChartHeights = () => {
   const available = window.innerHeight - 56 - 20 - 20 - 60;
   return {
-    candle: Math.floor(available * 0.40),
-    ichimoku: Math.floor(available * 0.22),
-    rsi: Math.floor(available * 0.18),
-    macd: Math.floor(available * 0.20),
+    candle: Math.floor(available * 0.52),
+    macd:   Math.floor(available * 0.24),
+    rsi:    Math.floor(available * 0.24),
   };
 };
 
@@ -32,35 +30,30 @@ const calcMA = (data: any[], n: number): (number | null)[] =>
     return Math.round(vals.reduce((s, v) => s + v, 0) / n);
   });
 
-const addDays = (dateStr: string, n: number): string => {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
-};
-
 const calcIchimoku = (data: any[]) => {
   const hi = (i: number, n: number) =>
     Math.max(...data.slice(Math.max(0, i - n + 1), i + 1).map((d) => d.high ?? -Infinity));
   const lo = (i: number, n: number) =>
     Math.min(...data.slice(Math.max(0, i - n + 1), i + 1).map((d) => d.low ?? Infinity));
   return data.map((_, i) => ({
-    tenkan: i >= 8 ? Math.round((hi(i, 9) + lo(i, 9)) / 2) : null,
-    kijun: i >= 25 ? Math.round((hi(i, 26) + lo(i, 26)) / 2) : null,
-    spanA: i >= 8 && i >= 25 ? Math.round(((hi(i, 9) + lo(i, 9)) / 2 + (hi(i, 26) + lo(i, 26)) / 2) / 2) : null,
-    spanB: i >= 51 ? Math.round((hi(i, 52) + lo(i, 52)) / 2) : null,
+    tenkan: i >= 8  ? Math.round((hi(i, 9)  + lo(i, 9))  / 2) : null,
+    kijun:  i >= 25 ? Math.round((hi(i, 26) + lo(i, 26)) / 2) : null,
+    spanA:  i >= 8 && i >= 25 ? Math.round(((hi(i, 9) + lo(i, 9)) / 2 + (hi(i, 26) + lo(i, 26)) / 2) / 2) : null,
+    spanB:  i >= 51 ? Math.round((hi(i, 52) + lo(i, 52)) / 2) : null,
   }));
 };
 
 const SIGNAL_BADGE: Record<string, { label: string; color: string; bg: string }> = {
-  매수: { label: 'BUY', color: '#fff', bg: '#16a34a' },
+  매수: { label: 'BUY',  color: '#fff', bg: '#16a34a' },
   매도: { label: 'SELL', color: '#fff', bg: '#dc2626' },
 };
+const SIMPLE_SELL_BADGE = { label: 'SELL', color: '#d97706', bg: '#78350f55' };
 
 const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) => {
   const { x, y, width, height, payload } = props;
   if (!payload || payload.open == null || payload.close == null) return null;
   if (y == null || height == null || !width || height === 0) return null;
-  const { open, high, low, close, aiSignal } = payload;
+  const { open, high, low, close, aiSignal, simpleSell } = payload;
   const isUp = close >= open;
   const color = isUp ? '#16a34a' : '#dc2626';
   const domainMinPixel = y + height;
@@ -68,30 +61,33 @@ const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) =
   const toY = (v: number) => domainMinPixel - (v - domainMin) * pixelPerUnit;
   const openY = toY(open); const closeY = toY(close);
   const highY = toY(high ?? Math.max(open, close));
-  const lowY = toY(low ?? Math.min(open, close));
+  const lowY  = toY(low  ?? Math.min(open, close));
   const bodyTop = Math.min(openY, closeY);
-  const bodyH = Math.max(Math.abs(openY - closeY), 1);
+  const bodyH   = Math.max(Math.abs(openY - closeY), 1);
   const bw = Math.max(width - 2, 2); const cx = x + width / 2;
-
-  const badge = aiSignal && SIGNAL_BADGE[aiSignal] ? SIGNAL_BADGE[aiSignal] : null;
-
+  const b = aiSignal && SIGNAL_BADGE[aiSignal] ? SIGNAL_BADGE[aiSignal] : null;
+  const showSimpleSell = simpleSell && !b;
   return (
     <g>
       <line x1={cx} y1={highY} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1.5} />
       <line x1={cx} y1={bodyTop + bodyH} x2={cx} y2={lowY} stroke={color} strokeWidth={1.5} />
       <rect x={cx - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={color} stroke={color} strokeWidth={1} />
-      {badge && aiSignal === '매도' && (
-        // SELL: 고가 위에 표시
+      {b && aiSignal === '매도' && (
         <g>
-          <rect x={cx - 12} y={highY - 13} width={24} height={10} rx={2} fill={badge.bg} />
-          <text x={cx} y={highY - 6} textAnchor="middle" fontSize={7} fontWeight="700" fill={badge.color}>{badge.label}</text>
+          <rect x={cx - 12} y={highY - 14} width={24} height={11} rx={2} fill={b.bg} />
+          <text x={cx} y={highY - 6} textAnchor="middle" fontSize={6} fontWeight="700" fill={b.color}>SELL</text>
         </g>
       )}
-      {badge && aiSignal === '매수' && (
-        // BUY: 저가 아래에 표시
+      {b && aiSignal === '매수' && (
         <g>
-          <rect x={cx - 12} y={lowY + 3} width={24} height={10} rx={2} fill={badge.bg} />
-          <text x={cx} y={lowY + 11} textAnchor="middle" fontSize={7} fontWeight="700" fill={badge.color}>{badge.label}</text>
+          <rect x={cx - 12} y={lowY + 3} width={24} height={11} rx={2} fill={b.bg} />
+          <text x={cx} y={lowY + 11} textAnchor="middle" fontSize={6} fontWeight="700" fill={b.color}>{b.label}</text>
+        </g>
+      )}
+      {showSimpleSell && (
+        <g>
+          <rect x={cx - 12} y={highY - 14} width={24} height={11} rx={2} fill={SIMPLE_SELL_BADGE.bg} stroke="#d97706" strokeWidth={0.5} />
+          <text x={cx} y={highY - 6} textAnchor="middle" fontSize={6} fontWeight="700" fill={SIMPLE_SELL_BADGE.color}>{SIMPLE_SELL_BADGE.label}</text>
         </g>
       )}
     </g>
@@ -109,37 +105,78 @@ const tipRow = (lbl: string, val: any, color = '#e2e8f0') => val != null ? (
 
 const fmt = (v: any) => v != null ? Math.round(v).toLocaleString() : null;
 
+const bdg = (label: string, color: string) => (
+  <span key={label} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: color + '22', color, border: '1px solid ' + color + '55', fontWeight: 600 }}>
+    {label}
+  </span>
+); 
+
+const tipHeader = (label: string, ...badges: (React.ReactElement | null)[]) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 6 }}>
+    <span style={{ color: '#6366f1', fontWeight: 600 }}>{label}</span>
+    <span style={{ display: 'flex', gap: 4 }}>{badges.filter(Boolean)}</span>
+  </div>
+);
+
+const getCompositeSignal = (d: any) => {
+  if (!d) return null;
+  if (d.rsiBreakDown) return { label: '강한 매도', sub: 'RSI 70 하방이탈', color: '#dc2626' };
+
+  let bull = 0;
+  let bear = 0;
+
+  if (d.ma5 != null && d.ma20 != null && d.ma60 != null) {
+    if (d.ma5 > d.ma20 && d.ma20 > d.ma60) bull++;
+    else if (d.ma5 < d.ma20 && d.ma20 < d.ma60) bear++;
+  }
+  if (d.macd != null && d.macdSignal != null) {
+    if (d.macd > d.macdSignal) bull++;
+    else if (d.macd < d.macdSignal) bear++;
+  }
+  if (d.rsi != null) {
+    if (d.rsi <= 30) bull++;
+    else if (d.rsi >= 70) bear++;
+    else bull += 0.5;
+  }
+
+  const score = bull - bear;
+  if (score >= 2.5) return { label: '강한 매수', sub: '3개 지표 매수', color: '#16a34a' };
+  if (score >= 1.5) return { label: '매수 우세', sub: '2개 지표 매수', color: '#4ade80' };
+  if (score <= -2)  return { label: '강한 매도', sub: '3개 지표 매도', color: '#dc2626' };
+  if (score <= -1)  return { label: '매도 우세', sub: '2개 지표 매도', color: '#f87171' };
+  return { label: '중립', sub: '지표 혼재', color: '#6b7280' };
+};
+
 const CandleTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d || d.open == null) return null;
+  const maState = d.ma5 != null && d.ma20 != null && d.ma60 != null
+    ? d.ma5 > d.ma20 && d.ma20 > d.ma60 ? bdg('정배열', '#16a34a')
+    : d.ma5 < d.ma20 && d.ma20 < d.ma60 ? bdg('역배열', '#dc2626')
+    : null : null;
+  const crossBadge = d.goldenCross ? bdg('골든크로스', '#facc15')
+    : d.deadCross ? bdg('데드크로스', '#a855f7')
+    : null;
+  const composite = getCompositeSignal(d);
   return (
     <div style={TIP}>
-      <div style={{ color: '#6366f1', marginBottom: 4, fontWeight: 600 }}>{label}</div>
+      {tipHeader(label, maState, crossBadge)}
+      {composite && (
+        <div style={{ margin: '4px 0 6px', padding: '4px 8px', borderRadius: 4, background: composite.color + '18', border: '1px solid ' + composite.color + '44', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: composite.color }}>{composite.label}</span>
+          <span style={{ fontSize: 9, color: composite.color + 'cc' }}>{composite.sub}</span>
+        </div>
+      )}
       {tipRow('시가', fmt(d.open))}
       {tipRow('고가', fmt(d.high), '#16a34a')}
       {tipRow('저가', fmt(d.low), '#dc2626')}
       {tipRow('종가', fmt(d.close))}
       {d.ma5 != null && <div style={{ marginTop: 4 }}>
-        {tipRow('MA5', fmt(d.ma5), '#facc15')}
+        {tipRow('MA5',  fmt(d.ma5),  '#facc15')}
         {tipRow('MA20', fmt(d.ma20), '#fb923c')}
         {d.ma60 != null && tipRow('MA60', fmt(d.ma60), '#a78bfa')}
       </div>}
-    </div>
-  );
-};
-
-const IchimokuTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]?.payload;
-  if (!d || (d.tenkan == null && d.spanA == null)) return null;
-  return (
-    <div style={TIP}>
-      <div style={{ color: '#6366f1', marginBottom: 4, fontWeight: 600 }}>{label}</div>
-      {tipRow('전환선', fmt(d.tenkan), '#38bdf8')}
-      {tipRow('기준선', fmt(d.kijun), '#f472b6')}
-      {tipRow('선행A', fmt(d.spanA), '#4ade80')}
-      {tipRow('선행B', fmt(d.spanB), '#f87171')}
     </div>
   );
 };
@@ -148,10 +185,18 @@ const RsiTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d || d.rsi == null) return null;
+  const rsi = d.rsi;
+  const rsiBreak = d.rsiBreakDown ? bdg('매도!', '#dc2626') : null;
+  const rsiLevel = rsi >= 70 ? bdg('과매수', '#f97316')
+    : rsi <= 30 ? bdg('과매도', '#16a34a')
+    : null;
   return (
     <div style={TIP}>
-      <div style={{ color: '#6366f1', marginBottom: 4, fontWeight: 600 }}>{label}</div>
-      {tipRow('RSI', d.rsi?.toFixed(2), '#6366f1')}
+      {tipHeader(label, rsiBreak, rsiLevel)}
+      {tipRow('RSI', rsi?.toFixed(2), '#6366f1')}
+      {d.rsiBreakDown && (
+        <div style={{ marginTop: 4, fontSize: 9, color: '#dc2626', fontWeight: 600 }}>RSI 70 하방이탈 - 매도 신호</div>
+      )}
     </div>
   );
 };
@@ -160,12 +205,18 @@ const MacdTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d || d.macd == null) return null;
+  const hist = d.histogram ?? 0;
+  const macdBadge = d.macd > d.macdSignal
+    ? bdg('MACD 위 (매수 우호)', '#16a34a')
+    : d.macd < d.macdSignal
+    ? bdg('시그널 위 (매도 우호)', '#dc2626')
+    : null;
   return (
     <div style={TIP}>
-      <div style={{ color: '#6366f1', marginBottom: 4, fontWeight: 600 }}>{label}</div>
-      {tipRow('MACD', fmt(d.macd), '#6366f1')}
-      {tipRow('시그널', fmt(d.macdSignal), '#f59e0b')}
-      {tipRow('히스토그램', fmt(d.histogram), (d.histogram ?? 0) >= 0 ? '#16a34a' : '#dc2626')}
+      {tipHeader(label, macdBadge)}
+      {tipRow('MACD',      fmt(d.macd),      '#6366f1')}
+      {tipRow('시그널',    fmt(d.macdSignal), '#f59e0b')}
+      {tipRow('히스토그램', fmt(d.histogram),  hist >= 0 ? '#16a34a' : '#dc2626')}
     </div>
   );
 };
@@ -176,19 +227,25 @@ interface Props {
   searchOnly?: boolean;
   chartOnly?: boolean;
   period?: Period;
+  sellMode?: 'ai' | 'simple';
 }
 
-const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, searchOnly, chartOnly, period: externalPeriod }) => {
+const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, searchOnly, chartOnly, period: externalPeriod, sellMode = 'ai' }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StockItem[]>([]);
   const [selected, setSelected] = useState<StockItem | null>(null);
   const [period, setPeriod] = useState<Period>('3m');
   const [chartData, setChartData] = useState<any[]>([]);
-  const [signals, setSignals] = useState<{ date: string; signal: string }[]>([]);
+  const [rawData, setRawData] = useState<{ trimmed: any[]; futurePadding: any[]; sigMap: Record<string, string> } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [heights, setHeights] = useState(getChartHeights());
+  const [viewRange, setViewRange] = useState<[number, number] | null>(null);
+  const chartWrapRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startX: number; startRange: [number, number] } | null>(null);
+  const isDragging = useRef(false);
+  const skipSearch = useRef(false);
 
   useEffect(() => {
     const onResize = () => setHeights(getChartHeights());
@@ -197,9 +254,106 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
   }, []);
 
   useEffect(() => {
+    if (!rawData) return;
+    const { trimmed, futurePadding, sigMap } = rawData;
+    const all = [...trimmed, ...futurePadding];
+    const finalData = all.map((row, i) => {
+      const prev = i > 0 ? all[i - 1] : null;
+      const simpleSell = sellMode === 'simple' && row.ma5 != null && prev?.ma5 != null && row.ma5 < prev.ma5;
+      const goldenCross = prev?.ma5 != null && prev?.ma20 != null && row.ma5 != null && row.ma20 != null
+        && prev.ma5 < prev.ma20 && row.ma5 > row.ma20;
+      const deadCross = prev?.ma5 != null && prev?.ma20 != null && row.ma5 != null && row.ma20 != null
+        && prev.ma5 > prev.ma20 && row.ma5 < row.ma20;
+      const rsiBreakDown = prev?.rsi != null && row.rsi != null && prev.rsi >= 70 && row.rsi < 70;
+      return { ...row, aiSignal: sigMap[row.datetime] ?? null, simpleSell, goldenCross, deadCross, rsiBreakDown };
+    });
+    setChartData(finalData);
+    setViewRange(null);
+  }, [rawData, sellMode]);
+
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const total = chartData.length;
+    if (total === 0) return;
+    setViewRange((prev) => {
+      const cur: [number, number] = prev ?? [0, total - 1];
+      const [s, en] = cur;
+      const span = en - s;
+      if (e.shiftKey) {
+        const step = Math.max(1, Math.floor(span * 0.15));
+        const shift = e.deltaY > 0 ? step : -step;
+        let ns = s + shift; let ne = en + shift;
+        if (ns < 0) { ns = 0; ne = span; }
+        if (ne >= total) { ne = total - 1; ns = ne - span; }
+        return [Math.max(0, ns), ne];
+      }
+      const delta = e.deltaY > 0 ? 1 : -1;
+      const step = Math.max(1, Math.floor(span * 0.15));
+      const newSpan = Math.min(total - 1, Math.max(10, span + delta * step));
+      const ratio = chartWrapRef.current
+        ? Math.min(1, Math.max(0, (e.clientX - chartWrapRef.current.getBoundingClientRect().left) / chartWrapRef.current.offsetWidth))
+        : 0.5;
+      const anchor = Math.round(s + span * ratio);
+      let ns = Math.round(anchor - newSpan * ratio);
+      let ne = ns + newSpan;
+      if (ns < 0) { ns = 0; ne = newSpan; }
+      if (ne >= total) { ne = total - 1; ns = ne - newSpan; }
+      return [Math.max(0, ns), ne];
+    });
+  }, [chartData.length]);
+
+  useEffect(() => {
+    const el = chartWrapRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const total = chartData.length;
+    if (total === 0) return;
+    const cur: [number, number] = viewRange ?? [0, total - 1];
+    dragRef.current = { startX: e.clientX, startRange: cur };
+    isDragging.current = false;
+    let rafId: number | null = null;
+    let pendingRange: [number, number] | null = null;
+    const onMove = (me: MouseEvent) => {
+      if (!dragRef.current || !chartWrapRef.current) return;
+      const dx = me.clientX - dragRef.current.startX;
+      if (Math.abs(dx) > 3) isDragging.current = true;
+      if (!isDragging.current) return;
+      const width = chartWrapRef.current.offsetWidth - Y_AXIS_WIDTH;
+      const [s, en] = dragRef.current.startRange;
+      const span = en - s;
+      const shift = Math.round(-(dx / width) * span);
+      let ns = s + shift; let ne = en + shift;
+      if (ns < 0) { ns = 0; ne = span; }
+      if (ne >= total) { ne = total - 1; ns = ne - span; }
+      pendingRange = [Math.max(0, ns), ne];
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          if (pendingRange) setViewRange(pendingRange);
+          rafId = null;
+        });
+      }
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const handleDoubleClick = () => setViewRange(null);
+
+  useEffect(() => {
     if (externalPeriod && externalPeriod !== period) {
       setPeriod(externalPeriod);
-      if (selected) fetchAll(selected.stock_code, externalPeriod);
+      if (selected) fetchAll(selected.stock_code, selected.stock_name, externalPeriod);
     }
   }, [externalPeriod]);
 
@@ -208,13 +362,19 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       const p = externalPeriod ?? period;
       if (chartOnly) {
         setSelected({ stock_code: initialStock.code, stock_name: initialStock.name });
-        fetchAll(initialStock.code, p);
-      } else if (!chartOnly && !searchOnly) {
-        setQuery(initialStock.name);
+        fetchAll(initialStock.code, initialStock.name, p);
+      } else if (searchOnly) {
+        skipSearch.current = true;
+        setQuery('');
+        setResults([]);
+        setShowDropdown(false);
+      } else {
+        skipSearch.current = true;
+        setQuery('');
         setSelected({ stock_code: initialStock.code, stock_name: initialStock.name });
         setResults([]);
         setShowDropdown(false);
-        fetchAll(initialStock.code, p);
+        fetchAll(initialStock.code, initialStock.name, p);
       }
     }
   }, [initialStock?.code]);
@@ -224,7 +384,16 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     stockApi.search(query).then((res) => { setResults(res.data); setShowDropdown(true); });
   };
 
-  const fetchAll = (code: string, p: Period) => {
+  useEffect(() => {
+    if (skipSearch.current) { skipSearch.current = false; return; }
+    if (!query.trim()) { setResults([]); setShowDropdown(false); return; }
+    const timer = setTimeout(() => {
+      stockApi.search(query).then((res) => { setResults(res.data); setShowDropdown(true); });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const fetchAll = (code: string, name: string, p: Period) => {
     if (searchOnly) return;
     setLoading(true);
     setError('');
@@ -235,7 +404,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       stockApi.getCandles(code, fetchDays),
       stockApi.getRSI(code, p),
       stockApi.getMACD(code, p),
-      stockApi.getPredictions(undefined, 300, code),
+      stockApi.getPredictions(undefined, 500, name),
     ])
       .then(([candleRes, rsiRes, macdRes, predRes]) => {
         const map: Record<string, any> = {};
@@ -243,9 +412,9 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           const key = d.datetime.slice(0, 10);
           map[key] = {
             ...d, datetime: key,
-            open: d.open != null ? Math.round(d.open) : null,
-            high: d.high != null ? Math.round(d.high) : null,
-            low: d.low != null ? Math.round(d.low) : null,
+            open:  d.open  != null ? Math.round(d.open)  : null,
+            high:  d.high  != null ? Math.round(d.high)  : null,
+            low:   d.low   != null ? Math.round(d.low)   : null,
             close: d.close != null ? Math.round(d.close) : null,
           };
         });
@@ -279,13 +448,16 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             ...d,
             ma5: ma5arr[i], ma20: ma20arr[i], ma60: ma60arr[i],
             tenkan: ichimokuRaw[i].tenkan,
-            kijun: ichimokuRaw[i].kijun,
+            kijun:  ichimokuRaw[i].kijun,
             spanA: shiftedIdx >= 0 ? ichimokuRaw[shiftedIdx].spanA : null,
             spanB: shiftedIdx >= 0 ? ichimokuRaw[shiftedIdx].spanB : null,
+            cloudTop: shiftedIdx >= 0 && ichimokuRaw[shiftedIdx].spanA != null && ichimokuRaw[shiftedIdx].spanB != null
+              ? Math.max(ichimokuRaw[shiftedIdx].spanA!, ichimokuRaw[shiftedIdx].spanB!) : null,
+            cloudBottom: shiftedIdx >= 0 && ichimokuRaw[shiftedIdx].spanA != null && ichimokuRaw[shiftedIdx].spanB != null
+              ? Math.min(ichimokuRaw[shiftedIdx].spanA!, ichimokuRaw[shiftedIdx].spanB!) : null,
           };
         }).filter((d) => d.datetime >= cutStr);
 
-        // 미래 선행스팬 패딩 (일목균형표용, 영업일 26일)
         const lastDate = trimmed.length ? trimmed[trimmed.length - 1].datetime : '';
         const futureDates: string[] = [];
         const tempD = new Date(lastDate);
@@ -297,48 +469,48 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
         const futurePadding = futureDates.map((futureDate, i) => {
           const srcIdx = sorted.length - 26 + i;
           const ichi = srcIdx >= 0 ? ichimokuRaw[srcIdx] : null;
-          return { datetime: futureDate, spanA: ichi?.spanA ?? null, spanB: ichi?.spanB ?? null };
+          const spanA = ichi?.spanA ?? null;
+          const spanB = ichi?.spanB ?? null;
+          return {
+            datetime: futureDate, spanA, spanB,
+            cloudTop: spanA != null && spanB != null ? Math.max(spanA, spanB) : null,
+            cloudBottom: spanA != null && spanB != null ? Math.min(spanA, spanB) : null,
+          };
         });
 
-        // AI 신호를 chartData에 직접 합치기
         const sigMap: Record<string, string> = {};
         (predRes.data || []).forEach((pd: any) => {
           const date = (pd.predicted_at || '').slice(0, 10);
-          if (date >= cutStr) sigMap[date] = pd.signal;
+          sigMap[date] = pd.signal;
         });
 
-        const finalData = [...trimmed, ...futurePadding].map((row) => ({
-          ...row,
-          aiSignal: sigMap[row.datetime] ?? null,
-        }));
-
-        setChartData(finalData);
-        setSignals([]);
+        setRawData({ trimmed, futurePadding, sigMap });
       })
       .catch(() => setError('데이터를 불러오지 못했습니다.'))
       .finally(() => setLoading(false));
   };
 
   const handleSelect = (item: StockItem) => {
+    skipSearch.current = true;
     setSelected(item); setResults([]); setShowDropdown(false);
     setQuery(item.stock_name);
     onStockChange?.(item.stock_code, item.stock_name);
-    if (!searchOnly) fetchAll(item.stock_code, externalPeriod ?? period);
+    if (!searchOnly) fetchAll(item.stock_code, item.stock_name, externalPeriod ?? period);
   };
 
-  const candlePrices = chartData.flatMap((d) =>
-    [d.high, d.low, d.ma5, d.ma20, d.ma60].filter((v) => v != null && !isNaN(v))
+  const visData = React.useMemo(
+    () => viewRange ? chartData.slice(viewRange[0], viewRange[1] + 1) : chartData,
+    [chartData, viewRange]
   );
-  const pMin = candlePrices.length ? Math.min(...candlePrices) * 0.997 : 0;
-  const pMax = candlePrices.length ? Math.max(...candlePrices) * 1.003 : 100;
 
-  const ichiPrices = chartData.flatMap((d) =>
-    [d.tenkan, d.kijun, d.spanA, d.spanB].filter((v) => v != null && !isNaN(v))
-  );
-  const iMin = ichiPrices.length ? Math.min(...ichiPrices) * 0.997 : 0;
-  const iMax = ichiPrices.length ? Math.max(...ichiPrices) * 1.003 : 100;
+  const [visPMin, visPMax] = React.useMemo(() => {
+    const prices = visData.flatMap((d: any) =>
+      [d.high, d.low, d.ma5, d.ma20, d.ma60, d.tenkan, d.kijun, d.spanA, d.spanB].filter((v: any) => v != null && !isNaN(v))
+    );
+    return prices.length ? [Math.min(...prices) * 0.997, Math.max(...prices) * 1.003] : [0, 100];
+  }, [visData]);
 
-  const CandleShape = makeCandleShape(pMin, pMax);
+  const CandleShape = makeCandleShape(visPMin, visPMax);
 
   if (searchOnly) {
     return (
@@ -374,59 +546,92 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       {error && <div className="ex-error">{error}</div>}
 
       {!loading && chartData.length > 0 && (
-        <>
-          <div style={{ fontSize: 10, color: '#666', marginBottom: 2 }}>캔들 + 이동평균</div>
+        <div
+          ref={chartWrapRef}
+          onMouseDown={handleMouseDown}
+          onDoubleClick={handleDoubleClick}
+          style={{ cursor: 'crosshair', userSelect: 'none' }}
+        >
+          <div style={{ fontSize: 10, color: '#666', marginBottom: 2 }}>캔들 + 이동평균 + 일목균형표</div>
           <ResponsiveContainer width="100%" height={heights.candle}>
-            <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
+            <ComposedChart data={visData} syncId={SYNC_ID} margin={MARGIN}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
               <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
-              <YAxis domain={[pMin, pMax]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
-                tickFormatter={(v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : String(Math.round(v))} />
+              <YAxis domain={[visPMin, visPMax]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
+                tickFormatter={(v) => v >= 1000000 ? String((v/1000000).toFixed(1)) + 'M' : v >= 1000 ? String((v/1000).toFixed(0)) + 'K' : String(Math.round(v))} />
               <Tooltip content={<CandleTooltip />} />
               <Legend verticalAlign="top" wrapperStyle={{ fontSize: 10, paddingBottom: 2 }}
                 content={() => (
-                  <div style={{ display: 'flex', gap: 12, paddingBottom: 4, fontSize: 10 }}>
-                    {[{ name: 'MA5', color: '#facc15' }, { name: 'MA20', color: '#fb923c' }, { name: 'MA60', color: '#a78bfa' }].map((m) => (
+                  <div style={{ display: 'flex', gap: 12, paddingBottom: 4, fontSize: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {[
+                      { name: 'MA5', color: '#facc15' }, { name: 'MA20', color: '#fb923c' }, { name: 'MA60', color: '#a78bfa' },
+                      { name: '전환선', color: '#38bdf8' }, { name: '기준선', color: '#f472b6' },
+                      { name: '선행A', color: '#4ade80' }, { name: '선행B', color: '#f87171' },
+                    ].map((m) => (
                       <span key={m.name} style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa' }}>
                         <span style={{ width: 16, height: 2, background: m.color, display: 'inline-block' }} />
                         {m.name}
                       </span>
                     ))}
+                    <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#16a34a', color: '#fff' }}>BUY (AI)</span>
+                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#dc2626', color: '#fff' }}>SELL (AI)</span>
+                      {sellMode === 'simple' && (
+                        <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#78350f55', color: '#d97706', border: '1px solid #d97706' }}>SELL (단순)</span>
+                      )}
+                    </span>
                   </div>
                 )} />
               <Bar dataKey="close" shape={CandleShape} isAnimationActive={false} maxBarSize={20} name="캔들" legendType="none">
-                {chartData.map((d, i) => (
+                {visData.map((d, i) => (
                   <Cell key={i} fill={(d.close ?? 0) >= (d.open ?? 0) ? '#16a34a' : '#dc2626'} />
                 ))}
               </Bar>
-              <Line type="monotone" dataKey="ma60" stroke="#a78bfa" dot={false} strokeWidth={1.5} connectNulls legendType="none" />
-              <Line type="monotone" dataKey="ma20" stroke="#fb923c" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
-              <Line type="monotone" dataKey="ma5" stroke="#facc15" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="ma60"   stroke="#a78bfa" dot={false} strokeWidth={1.5} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="ma20"   stroke="#fb923c" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="ma5"    stroke="#facc15" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="tenkan" stroke="#38bdf8" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="kijun"  stroke="#f472b6" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Area type="monotone" dataKey="cloudTop"    stroke="none" fill="#4ade80" fillOpacity={0.12} connectNulls legendType="none" baseValue="dataMin" />
+              <Area type="monotone" dataKey="cloudBottom" stroke="none" fill="#0a0a14" fillOpacity={1}    connectNulls legendType="none" baseValue="dataMin" />
+              <Line type="monotone" dataKey="spanA"  stroke="#4ade80" dot={false} strokeWidth={0.8} connectNulls legendType="none" strokeDasharray="3 2" />
+              <Line type="monotone" dataKey="spanB"  stroke="#f87171" dot={false} strokeWidth={0.8} connectNulls legendType="none" strokeDasharray="3 2" />
             </ComposedChart>
           </ResponsiveContainer>
 
-          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2 }}>일목균형표</div>
-          <ResponsiveContainer width="100%" height={heights.ichimoku}>
-            <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
+          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span>MACD</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 14, height: 2, background: '#6366f1', display: 'inline-block' }} />MACD</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 14, height: 2, background: '#f59e0b', display: 'inline-block' }} />시그널</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 8, height: 8, background: '#16a34a', display: 'inline-block', borderRadius: 1 }} />양/음봉</span>
+          </div>
+          <ResponsiveContainer width="100%" height={heights.macd}>
+            <ComposedChart data={visData} syncId={SYNC_ID} margin={MARGIN}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
               <XAxis dataKey="datetime" tick={false} height={0} />
-              <YAxis domain={[iMin, iMax]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
-                tickFormatter={(v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : String(Math.round(v))} />
-              <Tooltip content={<IchimokuTooltip />} />
-              <Legend verticalAlign="top" wrapperStyle={{ fontSize: 10, paddingBottom: 2 }}
-                formatter={(v) => <span style={{ color: '#aaa' }}>{v}</span>} />
-              <Line type="monotone" dataKey="tenkan" stroke="#38bdf8" dot={false} strokeWidth={1.5} connectNulls name="전환선" />
-              <Line type="monotone" dataKey="kijun" stroke="#f472b6" dot={false} strokeWidth={1.5} connectNulls name="기준선" />
-              <Line type="monotone" dataKey="spanA" stroke="#4ade80" dot={false} strokeWidth={1} connectNulls name="선행A" strokeDasharray="3 2" />
-              <Line type="monotone" dataKey="spanB" stroke="#f87171" dot={false} strokeWidth={1} connectNulls name="선행B" strokeDasharray="3 2" />
+              <YAxis tick={false} width={Y_AXIS_WIDTH} axisLine={false} tickLine={false} />
+              <Tooltip content={<MacdTooltip />} />
+              <ReferenceLine y={0} stroke="#555" strokeWidth={1} label={{ value: '0', position: 'left', fill: '#555', fontSize: 9 }} />
+              <Bar dataKey="histogram" isAnimationActive={false} maxBarSize={8}>
+                {visData.map((d, i) => (
+                  <Cell key={i} fill={(d.histogram ?? 0) >= 0 ? '#16a34a' : '#dc2626'} fillOpacity={0.7} />
+                ))}
+              </Bar>
+              <Line type="monotone" dataKey="macd"       stroke="#6366f1" dot={false} strokeWidth={1.5} connectNulls />
+              <Line type="monotone" dataKey="macdSignal" stroke="#f59e0b" dot={false} strokeWidth={1.5} connectNulls />
             </ComposedChart>
           </ResponsiveContainer>
 
-          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2 }}>RSI (14)</div>
+          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span>RSI (14)</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 14, height: 2, background: '#6366f1', display: 'inline-block' }} />RSI</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#dc2626', fontSize: 9 }}>— 70 과매수</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#16a34a', fontSize: 9 }}>— 30 과매도</span>
+          </div>
           <ResponsiveContainer width="100%" height={heights.rsi}>
-            <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
+            <ComposedChart data={visData} syncId={SYNC_ID} margin={{ ...MARGIN, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
-              <XAxis dataKey="datetime" tick={false} height={0} />
+              <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH} ticks={[30, 70]} />
               <Tooltip content={<RsiTooltip />} />
               <ReferenceLine y={70} stroke="#dc2626" strokeDasharray="3 3" strokeOpacity={0.5} />
@@ -434,25 +639,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
               <Line type="monotone" dataKey="rsi" stroke="#6366f1" dot={false} strokeWidth={1.5} connectNulls />
             </ComposedChart>
           </ResponsiveContainer>
-
-          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2 }}>MACD</div>
-          <ResponsiveContainer width="100%" height={heights.macd}>
-            <ComposedChart data={chartData} syncId={SYNC_ID} margin={{ ...MARGIN, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
-              <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
-              <YAxis tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH} />
-              <Tooltip content={<MacdTooltip />} />
-              <ReferenceLine y={0} stroke="#444" />
-              <Bar dataKey="histogram" isAnimationActive={false} maxBarSize={8}>
-                {chartData.map((d, i) => (
-                  <Cell key={i} fill={(d.histogram ?? 0) >= 0 ? '#16a34a' : '#dc2626'} fillOpacity={0.7} />
-                ))}
-              </Bar>
-              <Line type="monotone" dataKey="macd" stroke="#6366f1" dot={false} strokeWidth={1.5} connectNulls />
-              <Line type="monotone" dataKey="macdSignal" stroke="#f59e0b" dot={false} strokeWidth={1.5} connectNulls />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </>
+        </div>
       )}
     </div>
   );
