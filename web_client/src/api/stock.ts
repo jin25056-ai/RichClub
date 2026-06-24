@@ -116,6 +116,6 @@ export const stockApi = {
 export const marketApi = {
   getGlobal: () => apiClient.get<GlobalMarketResponse>('/api/v1/market/global'),
 
-  getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number }) =>
+  getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate', { params }),
 };

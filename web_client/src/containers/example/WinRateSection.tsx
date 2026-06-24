@@ -15,16 +15,31 @@ const fmtKRW = (n: number) => {
 const pctColor = (v: number) => v >= 0 ? '#16a34a' : '#dc2626';
 const pctStr = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 
+const inputStyle: React.CSSProperties = {
+  background: '#1e1e2e', border: '1px solid #2d2d3d',
+  borderRadius: 4, padding: '3px 5px', fontSize: 10,
+  color: '#e2e8f0', outline: 'none', width: '100%',
+};
+
 const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
   const [period, setPeriod] = useState('3m');
+  const [useCustomDate, setUseCustomDate] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [results, setResults] = useState<WinRateResult[]>([]);
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [inputAmt, setInputAmt] = useState('1000000');
 
-  const fetchData = (p: string, sc?: string) => {
+  const fetchData = (p: string, sc?: string, sd?: string, ed?: string) => {
     setLoading(true);
-    marketApi.getWinRate({ stock_code: sc || undefined, period: p, hold_days: 5 })
+    marketApi.getWinRate({
+      stock_code: sc || undefined,
+      period: p,
+      hold_days: 5,
+      start_date: sd || undefined,
+      end_date: ed || undefined,
+    })
       .then((res) => {
         setResults(res.data.results);
         setTrades(res.data.trades || []);
@@ -36,6 +51,18 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
   useEffect(() => {
     if (stockCode) fetchData(period, stockCode);
   }, [stockCode]);
+
+  const handlePeriod = (p: string) => {
+    setPeriod(p);
+    setUseCustomDate(false);
+    fetchData(p, stockCode);
+  };
+
+  const handleCustomSearch = () => {
+    if (!startDate) return;
+    setUseCustomDate(true);
+    fetchData(period, stockCode, startDate, endDate);
+  };
 
   const r = results[0] ?? null;
   const cumPct = r?.cumulative_return_pct ?? null;
@@ -50,17 +77,37 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
 
   return (
     <div>
-      {/* 분석 기간 */}
-      <div style={{ display: 'flex', gap: 3, marginBottom: 10, alignItems: 'center' }}>
-        <span style={{ fontSize: 9, color: '#555' }}>기간</span>
-        {(['1m', '3m', '6m', 'all'] as const).map((p) => (
-          <button key={p} onClick={() => { setPeriod(p); fetchData(p, stockCode); }}
+      {/* 기간 선택 */}
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 3, marginBottom: 5, alignItems: 'center' }}>
+          <span style={{ fontSize: 9, color: '#555' }}>기간</span>
+          {(['1m', '3m', '6m', 'all'] as const).map((p) => (
+            <button key={p} onClick={() => handlePeriod(p)}
+              style={{
+                padding: '2px 6px', fontSize: 10, borderRadius: 3, border: 'none', cursor: 'pointer',
+                background: period === p && !useCustomDate ? '#6366f1' : '#1e1e2e',
+                color: period === p && !useCustomDate ? '#fff' : '#888',
+              }}>{p}</button>
+          ))}
+        </div>
+
+        {/* 날짜 직접 선택 */}
+        <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+          <input
+            value={startDate} onChange={(e) => setStartDate(e.target.value)}
+            placeholder="YYMMDD" maxLength={6}
+            style={{ ...inputStyle, width: 55, textAlign: 'center' }} />
+          <span style={{ fontSize: 9, color: '#555' }}>~</span>
+          <input
+            value={endDate} onChange={(e) => setEndDate(e.target.value)}
+            placeholder="YYMMDD" maxLength={6}
+            style={{ ...inputStyle, width: 55, textAlign: 'center' }} />
+          <button onClick={handleCustomSearch}
             style={{
-              padding: '2px 6px', fontSize: 10, borderRadius: 3, border: 'none', cursor: 'pointer',
-              background: period === p ? '#6366f1' : '#1e1e2e',
-              color: period === p ? '#fff' : '#888',
-            }}>{p}</button>
-        ))}
+              padding: '2px 8px', fontSize: 10, borderRadius: 3, border: 'none', cursor: 'pointer',
+              background: useCustomDate ? '#6366f1' : '#2d2d3d', color: '#fff', flexShrink: 0,
+            }}>조회</button>
+        </div>
       </div>
 
       {loading && <div style={{ fontSize: 11, color: '#666' }}>불러오는 중...</div>}
@@ -83,7 +130,7 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
                 padding: '5px 8px', marginBottom: 3, borderRadius: 5,
                 background: (t.return_pct ?? 0) >= 0 ? '#14532d22' : '#7f1d1d22',
               }}>
-                <div style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 9, color: '#6b7280', flexWrap: 'nowrap' }}>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 9, color: '#6b7280' }}>
                   <span style={{ color: '#16a34a', fontWeight: 600 }}>B</span>
                   <span>{t.buy_date}</span>
                   <span style={{ color: '#555' }}>→</span>
@@ -100,8 +147,7 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
               <div key={i} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '5px 8px', marginBottom: 3, borderRadius: 5,
-                background: '#0d0d1a',
-                border: '1px dashed #2d2d3d',
+                background: '#0d0d1a', border: '1px dashed #2d2d3d',
               }}>
                 <div style={{ fontSize: 9, color: '#6b7280' }}>
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -148,10 +194,7 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
               <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
                 <input value={inputAmt}
                   onChange={(e) => setInputAmt(e.target.value.replace(/[^0-9]/g, ''))}
-                  style={{
-                    flex: 1, background: '#1e1e2e', border: '1px solid #2d2d3d',
-                    borderRadius: 4, padding: '4px 6px', fontSize: 10, color: '#e2e8f0', outline: 'none',
-                  }}
+                  style={{ ...inputStyle, flex: 1 }}
                   placeholder="투자금 입력" />
                 <span style={{ fontSize: 10, color: '#555', alignSelf: 'center' }}>원</span>
               </div>

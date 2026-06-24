@@ -1,12 +1,10 @@
 import logging
 import asyncio
-from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.db.mongo import get_db
 from app.scheduler.candle_collector import collect_5min_candles
-from app.scheduler.daily_collector import collect_daily_signals
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(timezone='UTC')
@@ -21,58 +19,91 @@ async def collect_market_data() -> None:
     logger.info("시장 데이터 수집 시작")
 
 
-async def run_daily_collect() -> None:
-    """매일 장 마감 후 오늘 날짜 신호 수집 (월~금 KST 16:30 = UTC 07:30)"""
+async def run_daily_predict() -> None:
+    """매일 장 마감 후 전 종목 예측 (KST 16:30 = UTC 07:30)"""
     db = get_db()
-    await collect_daily_signals(db)
+    from app.ml.predictor import run_daily_prediction
+    await run_daily_prediction(db)
 
 
-async def run_drift_check() -> None:
-    logger.info("드리프트 감지 실행")
+async def run_evaluate() -> None:
+    """매일 예측 성능 평가 (evaluate_at 지난 것들 처리, UTC 08:00)"""
+    db = get_db()
+    from app.ml.predictor import evaluate_predictions
+    await evaluate_predictions(db)
+
+
+async def run_retrain() -> None:
+    """매주 월요일 모델 재학습 (UTC 23:00 = KST 화 08:00)"""
+    db = get_db()
+    from app.ml.trainer import train_model
+    try:
+        result = await train_model(db, triggered_by="weekly_schedule")
+        logger.info(f"모델 재학습 완료: {result}")
+    except Exception as e:
+        logger.error(f"모델 재학습 실패: {e}")
+
+
+async def run_auto_retrain_if_needed() -> None:
+    """
+    예측 정확도가 50% 미만이면 자동 재학습 트리거
+    매주 수요일 점검
+    """
+    db = get_db()
+    from datetime import datetime, timezone, timedelta
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    pipeline = [
+        {'$match': {'predicted_at': {'$gte': since}, 'evaluated': True}},
+        {'$group': {
+            '_id': None,
+            'total': {'$sum': 1},
+            'correct': {'$sum': {'$cond': ['$is_correct', 1, 0]}},
+        }},
+    ]
+    agg = [doc async for doc in db.model_predictions.aggregate(pipeline)]
+    if not agg:
+        return
+    row = agg[0]
+    total = row['total']
+    if total < 20:
+        return
+    acc = row['correct'] / total
+    logger.info(f"[auto_retrain] 최근 7일 정확도: {acc:.2%} ({row['correct']}/{total})")
+    if acc < 0.50:
+        logger.warning(f"[auto_retrain] 정확도 50% 미만 → 자동 재학습 트리거")
+        from app.ml.trainer import train_model
+        await train_model(db, triggered_by="auto_drift")
 
 
 def start_scheduler() -> None:
-    # 글로벌 시장 데이터 수집 (UTC 00:00, 06:00 = KST 09:00, 15:00)
-    scheduler.add_job(
-        collect_market_data,
-        trigger="cron",
-        hour="0,6",
-        minute="0",
-        id="collect_market_data",
-        replace_existing=True,
-    )
+    # 글로벌 시장 (UTC 00:00, 06:00)
+    scheduler.add_job(collect_market_data, trigger="cron",
+                      hour="0,6", minute="0", id="collect_market_data", replace_existing=True)
 
-    # 5분봉 수집: 항상 5분마다 (장 외 시간도 수집, upsert로 중복 방지)
-    scheduler.add_job(
-        run_5min_candle_collection,
-        trigger="cron",
-        day_of_week="mon-fri",
-        minute="*/5",
-        id="collect_5min_candles",
-        replace_existing=True,
-    )
+    # 5분봉 수집 (월~금 항상, upsert)
+    scheduler.add_job(run_5min_candle_collection, trigger="cron",
+                      day_of_week="mon-fri", minute="*/5",
+                      id="collect_5min_candles", replace_existing=True)
 
-    # 일별 신호 수집 (월~금 KST 16:30 = UTC 07:30)
-    scheduler.add_job(
-        run_daily_collect,
-        trigger="cron",
-        day_of_week="mon-fri",
-        hour="7",
-        minute="30",
-        id="daily_collect",
-        replace_existing=True,
-    )
+    # 일별 예측 (KST 16:30 = UTC 07:30)
+    scheduler.add_job(run_daily_predict, trigger="cron",
+                      day_of_week="mon-fri", hour="7", minute="30",
+                      id="daily_predict", replace_existing=True)
 
-    # 드리프트 감지 (매주 월요일 UTC 23:00 = KST 월 08:00)
-    scheduler.add_job(
-        run_drift_check,
-        trigger="cron",
-        day_of_week="sun",
-        hour="23",
-        minute="0",
-        id="drift_check",
-        replace_existing=True,
-    )
+    # 예측 성능 평가 (UTC 08:00)
+    scheduler.add_job(run_evaluate, trigger="cron",
+                      hour="8", minute="0",
+                      id="evaluate_predictions", replace_existing=True)
+
+    # 주간 재학습 (일요일 UTC 23:00)
+    scheduler.add_job(run_retrain, trigger="cron",
+                      day_of_week="sun", hour="23", minute="0",
+                      id="weekly_retrain", replace_existing=True)
+
+    # 자동 재학습 체크 (수요일 UTC 09:00)
+    scheduler.add_job(run_auto_retrain_if_needed, trigger="cron",
+                      day_of_week="wed", hour="9", minute="0",
+                      id="auto_retrain_check", replace_existing=True)
 
     scheduler.start()
     logger.info("스케줄러 시작")

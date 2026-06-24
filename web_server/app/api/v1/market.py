@@ -214,7 +214,12 @@ async def get_global_market(_: dict = Depends(get_current_user)):
 PERIOD_DAYS_MAP = {"1m": 30, "3m": 90, "6m": 180, "all": 99999}
 
 
-def _to_date(dt) -> datetime:
+def _parse_date_input(s: str) -> datetime:
+    """YYMMDD 또는 YYYY-MM-DD 형식을 파싱"""
+    s = s.strip()
+    if len(s) == 6 and s.isdigit():
+        s = f"20{s[:2]}-{s[2:4]}-{s[4:6]}"
+    return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     if dt is None:
         return datetime.now(timezone.utc)
     if hasattr(dt, 'replace'):
@@ -227,16 +232,33 @@ async def get_win_rate(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
     hold_days: int = Query(5, ge=1, le=30),
+    start_date: Optional[str] = Query(None, description="시작일 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="종료일 (YYYY-MM-DD)"),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
     if period not in PERIOD_DAYS_MAP:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
 
-    days = PERIOD_DAYS_MAP[period]
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    # start_date/end_date 직접 지정 시 우선 적용
+    if start_date:
+        try:
+            since = _parse_date_input(start_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="start_date 형식 오류 (YYMMDD 또는 YYYY-MM-DD)")
+    else:
+        days = PERIOD_DAYS_MAP[period]
+        since = datetime.now(timezone.utc) - timedelta(days=days)
 
-    query: dict = {"predicted_at": {"$gte": since}}
+    if end_date:
+        try:
+            until = _parse_date_input(end_date) + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="end_date 형식 오류 (YYMMDD 또는 YYYY-MM-DD)")
+    else:
+        until = datetime.now(timezone.utc) + timedelta(days=1)
+
+    query: dict = {"predicted_at": {"$gte": since, "$lt": until}}
     if stock_code:
         query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
 
