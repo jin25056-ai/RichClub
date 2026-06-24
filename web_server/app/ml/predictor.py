@@ -150,7 +150,7 @@ async def evaluate_predictions(db: AsyncIOMotorDatabase):
         'evaluated': False,
         'evaluate_at': {'$lte': now},
         'close_at_prediction': {'$ne': None}
-    })
+    }).limit(200)
     docs = [doc async for doc in cursor]
     if not docs:
         return
@@ -158,24 +158,22 @@ async def evaluate_predictions(db: AsyncIOMotorDatabase):
     logger.info(f"[evaluator] 평가 대상: {len(docs)}건")
     updated = 0
 
+    # 종목+날짜 단위로 묶어서 yfinance 호출 최소화
+    from collections import defaultdict
+    groups = defaultdict(list)
     for doc in docs:
-        name = doc['stock_name']
-        eval_date = doc['evaluate_at']
-        close_at_pred = doc['close_at_prediction']
-        signal = doc['signal']
-
-        # eval_date 당일 종가 조회
-        eval_str = eval_date.strftime('%Y-%m-%d')
-        end_str = (eval_date + timedelta(days=3)).strftime('%Y-%m-%d')
         code = doc.get('stock_code', '')
         if not code or not code.isdigit():
-            # stock_code 없으면 DB에서 조회
-            sig = await db.total_trading_signals.find_one({'stock_name': name}, {'stock_code': 1})
+            sig = await db.total_trading_signals.find_one({'stock_name': doc.get('stock_name', '')}, {'stock_code': 1})
             code = sig.get('stock_code', '') if sig else ''
-        ticker = code + '.KS' if code and code.isdigit() else ''
-        if not ticker:
+        if not code:
             continue
+        eval_str = doc['evaluate_at'].strftime('%Y-%m-%d')
+        groups[(code, eval_str)].append(doc)
 
+    for (code, eval_str), group_docs in groups.items():
+        ticker = code + '.KS'
+        end_str = (datetime.strptime(eval_str, '%Y-%m-%d') + timedelta(days=3)).strftime('%Y-%m-%d')
         try:
             raw = await asyncio.get_event_loop().run_in_executor(
                 None,
@@ -185,33 +183,33 @@ async def evaluate_predictions(db: AsyncIOMotorDatabase):
             )
             if raw.empty:
                 continue
-
             if isinstance(raw.columns, pd.MultiIndex):
                 raw.columns = raw.columns.droplevel(1)
             raw.columns = [c.lower() for c in raw.columns]
             future_close = float(raw['close'].iloc[0])
-            ret_pct = round((future_close - close_at_pred) / close_at_pred * 100, 2)
 
-            # 정확도 판정
-            if signal == '매수':
-                is_correct = ret_pct > 0
-            elif signal == '매도':
-                is_correct = ret_pct < 0
-            else:  # 관망
-                is_correct = abs(ret_pct) <= 1.0
-
-            await col.update_one(
-                {'_id': doc['_id']},
-                {'$set': {
-                    'actual_return_pct': ret_pct,
-                    'future_close': future_close,
-                    'is_correct': is_correct,
-                    'evaluated': True,
-                    'evaluated_at': now,
-                }}
-            )
-            updated += 1
+            for doc in group_docs:
+                close_at_pred = doc['close_at_prediction']
+                signal = doc['signal']
+                ret_pct = round((future_close - close_at_pred) / close_at_pred * 100, 2)
+                if signal == '매수':
+                    is_correct = ret_pct > 0
+                elif signal == '매도':
+                    is_correct = ret_pct < 0
+                else:
+                    is_correct = abs(ret_pct) <= 1.0
+                await col.update_one(
+                    {'_id': doc['_id']},
+                    {'$set': {
+                        'actual_return_pct': ret_pct,
+                        'future_close': future_close,
+                        'is_correct': is_correct,
+                        'evaluated': True,
+                        'evaluated_at': now,
+                    }}
+                )
+                updated += 1
         except Exception as e:
-            logger.warning(f"{name} 평가 실패: {e}")
+            logger.warning(f"{ticker} 평가 실패: {e}")
 
     logger.info(f"[evaluator] 평가 완료: {updated}건")
