@@ -82,6 +82,7 @@ GLOBAL_SYMBOLS = [
     {"symbol": "QQQ",      "name": "나스닥100 ETF"},
     {"symbol": "USDKRW=X", "name": "달러/원 환율"},
     {"symbol": "CL=F",     "name": "WTI 원유"},
+    {"symbol": "GC=F",     "name": "금"},
     {"symbol": "^VIX",     "name": "VIX 공포지수"},
 ]
 

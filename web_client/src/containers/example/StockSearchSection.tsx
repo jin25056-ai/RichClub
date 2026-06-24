@@ -16,10 +16,9 @@ const ICHIMOKU_SHIFT = 26;
 const getChartHeights = () => {
   const available = window.innerHeight - 56 - 20 - 20 - 60;
   return {
-    candle:   Math.floor(available * 0.40),
-    ichimoku: Math.floor(available * 0.22),
-    rsi:      Math.floor(available * 0.18),
-    macd:     Math.floor(available * 0.20),
+    candle: Math.floor(available * 0.52),
+    macd:   Math.floor(available * 0.24),
+    rsi:    Math.floor(available * 0.24),
   };
 };
 
@@ -361,18 +360,23 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
 
       {!loading && chartData.length > 0 && (
         <>
-          <div style={{ fontSize: 10, color: '#666', marginBottom: 2 }}>캔들 + 이동평균</div>
+          {/* 캔들 + 이동평균 + 일목균형표 합치기 */}
+          <div style={{ fontSize: 10, color: '#666', marginBottom: 2 }}>캔들 + 이동평균 + 일목균형표</div>
           <ResponsiveContainer width="100%" height={heights.candle}>
             <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
               <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
-              <YAxis domain={[pMin, pMax]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
+              <YAxis domain={[Math.min(pMin, iMin), Math.max(pMax, iMax)]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
                 tickFormatter={(v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : String(Math.round(v))} />
               <Tooltip content={<CandleTooltip />} />
               <Legend verticalAlign="top" wrapperStyle={{ fontSize: 10, paddingBottom: 2 }}
                 content={() => (
-                  <div style={{ display: 'flex', gap: 12, paddingBottom: 4, fontSize: 10 }}>
-                    {[{ name: 'MA5', color: '#facc15' }, { name: 'MA20', color: '#fb923c' }, { name: 'MA60', color: '#a78bfa' }].map((m) => (
+                  <div style={{ display: 'flex', gap: 12, paddingBottom: 4, fontSize: 10, flexWrap: 'wrap' }}>
+                    {[
+                      { name: 'MA5', color: '#facc15' }, { name: 'MA20', color: '#fb923c' }, { name: 'MA60', color: '#a78bfa' },
+                      { name: '전환선', color: '#38bdf8' }, { name: '기준선', color: '#f472b6' },
+                      { name: '선행A', color: '#4ade80' }, { name: '선행B', color: '#f87171' },
+                    ].map((m) => (
                       <span key={m.name} style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa' }}>
                         <span style={{ width: 16, height: 2, background: m.color, display: 'inline-block' }} />
                         {m.name}
@@ -385,50 +389,25 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
                   <Cell key={i} fill={(d.close ?? 0) >= (d.open ?? 0) ? '#16a34a' : '#dc2626'} />
                 ))}
               </Bar>
-              <Line type="monotone" dataKey="ma60" stroke="#a78bfa" dot={false} strokeWidth={1.5} connectNulls legendType="none" />
-              <Line type="monotone" dataKey="ma20" stroke="#fb923c" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
-              <Line type="monotone" dataKey="ma5"  stroke="#facc15" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="ma60"   stroke="#a78bfa" dot={false} strokeWidth={1.5} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="ma20"   stroke="#fb923c" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="ma5"    stroke="#facc15" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="tenkan" stroke="#38bdf8" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="kijun"  stroke="#f472b6" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="spanA"  stroke="#4ade80" dot={false} strokeWidth={1}   connectNulls legendType="none" strokeDasharray="3 2" />
+              <Line type="monotone" dataKey="spanB"  stroke="#f87171" dot={false} strokeWidth={1}   connectNulls legendType="none" strokeDasharray="3 2" />
             </ComposedChart>
           </ResponsiveContainer>
 
-          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2 }}>일목균형표</div>
-          <ResponsiveContainer width="100%" height={heights.ichimoku}>
-            <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
-              <XAxis dataKey="datetime" tick={false} height={0} />
-              <YAxis domain={[iMin, iMax]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
-                tickFormatter={(v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : String(Math.round(v))} />
-              <Tooltip content={<IchimokuTooltip />} />
-              <Legend verticalAlign="top" wrapperStyle={{ fontSize: 10, paddingBottom: 2 }}
-                formatter={(v) => <span style={{ color: '#aaa' }}>{v}</span>} />
-              <Line type="monotone" dataKey="tenkan" stroke="#38bdf8" dot={false} strokeWidth={1.5} connectNulls name="전환선" />
-              <Line type="monotone" dataKey="kijun"  stroke="#f472b6" dot={false} strokeWidth={1.5} connectNulls name="기준선" />
-              <Line type="monotone" dataKey="spanA"  stroke="#4ade80" dot={false} strokeWidth={1}   connectNulls name="선행A" strokeDasharray="3 2" />
-              <Line type="monotone" dataKey="spanB"  stroke="#f87171" dot={false} strokeWidth={1}   connectNulls name="선행B" strokeDasharray="3 2" />
-            </ComposedChart>
-          </ResponsiveContainer>
-
-          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2 }}>RSI (14)</div>
-          <ResponsiveContainer width="100%" height={heights.rsi}>
-            <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
-              <XAxis dataKey="datetime" tick={false} height={0} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH} ticks={[30, 70]} />
-              <Tooltip content={<RsiTooltip />} />
-              <ReferenceLine y={70} stroke="#dc2626" strokeDasharray="3 3" strokeOpacity={0.5} />
-              <ReferenceLine y={30} stroke="#16a34a" strokeDasharray="3 3" strokeOpacity={0.5} />
-              <Line type="monotone" dataKey="rsi" stroke="#6366f1" dot={false} strokeWidth={1.5} connectNulls />
-            </ComposedChart>
-          </ResponsiveContainer>
-
+          {/* MACD - 매수 신호 위 */}
           <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2 }}>MACD</div>
           <ResponsiveContainer width="100%" height={heights.macd}>
-            <ComposedChart data={chartData} syncId={SYNC_ID} margin={{ ...MARGIN, bottom: 0 }}>
+            <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
-              <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
-              <YAxis tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH} />
+              <XAxis dataKey="datetime" tick={false} height={0} />
+              <YAxis tick={false} width={10} />
               <Tooltip content={<MacdTooltip />} />
-              <ReferenceLine y={0} stroke="#444" />
+              <ReferenceLine y={0} stroke="#555" strokeWidth={1} />
               <Bar dataKey="histogram" isAnimationActive={false} maxBarSize={8}>
                 {chartData.map((d, i) => (
                   <Cell key={i} fill={(d.histogram ?? 0) >= 0 ? '#16a34a' : '#dc2626'} fillOpacity={0.7} />
@@ -436,6 +415,20 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
               </Bar>
               <Line type="monotone" dataKey="macd"       stroke="#6366f1" dot={false} strokeWidth={1.5} connectNulls />
               <Line type="monotone" dataKey="macdSignal" stroke="#f59e0b" dot={false} strokeWidth={1.5} connectNulls />
+            </ComposedChart>
+          </ResponsiveContainer>
+
+          {/* RSI - 매도 신호 아래 */}
+          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2 }}>RSI (14)</div>
+          <ResponsiveContainer width="100%" height={heights.rsi}>
+            <ComposedChart data={chartData} syncId={SYNC_ID} margin={{ ...MARGIN, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
+              <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH} ticks={[30, 70]} />
+              <Tooltip content={<RsiTooltip />} />
+              <ReferenceLine y={70} stroke="#dc2626" strokeDasharray="3 3" strokeOpacity={0.5} />
+              <ReferenceLine y={30} stroke="#16a34a" strokeDasharray="3 3" strokeOpacity={0.5} />
+              <Line type="monotone" dataKey="rsi" stroke="#6366f1" dot={false} strokeWidth={1.5} connectNulls />
             </ComposedChart>
           </ResponsiveContainer>
         </>
