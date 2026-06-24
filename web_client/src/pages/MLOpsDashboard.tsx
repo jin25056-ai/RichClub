@@ -84,16 +84,19 @@ const MLOpsDashboard: React.FC = () => {
   const runEvaluate = async (silent = false) => {
     try {
       await apiClient.post('/api/v1/mlops/evaluate');
-      if (!silent) setMsg('평가 완료');
-      // 평가 후 데이터 새로고침
-      const [s, st, r] = await Promise.all([
-        apiClient.get<ModelStatus>('/api/v1/mlops/status'),
-        apiClient.get<PredictionStats[]>(`/api/v1/mlops/prediction-stats?days=${statsDays}`),
-        apiClient.get<RecentPrediction[]>(`/api/v1/mlops/recent-predictions?days=${recentDays}${signalFilter ? `&signal=${signalFilter}` : ''}`),
-      ]);
-      setStatus(s.data);
-      setStats(st.data);
-      setRecent(r.data);
+      if (!silent) setMsg('평가 시작됨 - 잠시 후 새로고침됩니다');
+      // 백그라운드 처리 대기 후 새로고침
+      setTimeout(async () => {
+        const [s, st, r] = await Promise.all([
+          apiClient.get<ModelStatus>('/api/v1/mlops/status'),
+          apiClient.get<PredictionStats[]>(`/api/v1/mlops/prediction-stats?days=${statsDays}`),
+          apiClient.get<RecentPrediction[]>(`/api/v1/mlops/recent-predictions?days=${recentDays}${signalFilter ? `&signal=${signalFilter}` : ''}`),
+        ]);
+        setStatus(s.data);
+        setStats(st.data);
+        setRecent(r.data);
+        if (!silent) setMsg('평가 완료');
+      }, 10000);
     } catch (e) {
       if (!silent) setMsg('평가 실패 - 로그인 확인');
     }
