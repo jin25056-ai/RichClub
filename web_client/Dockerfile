@@ -6,7 +6,7 @@ COPY package*.json ./
 RUN npm install
 
 COPY . .
-RUN GENERATE_SOURCEMAP=false npm run build
+RUN GENERATE_SOURCEMAP=false REACT_APP_API_BASE_URL=https://richclub.efforthye.dev npm run build
 
 FROM nginx:alpine
 COPY --from=builder /app/build /usr/share/nginx/html
