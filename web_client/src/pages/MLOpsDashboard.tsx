@@ -10,6 +10,19 @@ interface ModelStatus {
   pending_returns: number;
 }
 
+interface StockPerf {
+  stock_code: string;
+  stock_name: string;
+  total: number;
+  win: number;
+  accuracy: number;
+  avg_ret: number;
+  cumulative_ret: number;
+  max_ret: number;
+  min_ret: number;
+  unrealized_pct: number | null;
+}
+
 interface MonthlyPerf {
   month: string;
   total: number;
@@ -76,7 +89,8 @@ const MLOpsDashboard: React.FC = () => {
   const [stats, setStats] = useState<SignalStat>({ total: 0, correct: 0, accuracy: 0, avg_ret: 0, max_ret: 0, min_ret: 0 });
   const [recent, setRecent] = useState<RecentSignal[]>([]);
   const [history, setHistory] = useState<TrainHistory[]>([]);
-  const [statsDays, setStatsDays] = useState(90);
+  const [stocks, setStocks] = useState<StockPerf[]>([]);
+  const [stockDays, setStockDays] = useState(90);
   const [recentDays, setRecentDays] = useState(7);
   const [signalFilter, setSignalFilter] = useState('');
   const [loading, setLoading] = useState(false);
@@ -101,18 +115,20 @@ const MLOpsDashboard: React.FC = () => {
     if (!isLoggedIn) return;
     setLoading(true);
     try {
-      const [s, m, st, r, h] = await Promise.all([
+      const [s, m, st, r, h, sp] = await Promise.all([
         apiClient.get<ModelStatus>('/api/v1/mlops/status'),
         apiClient.get<MonthlyPerf[]>('/api/v1/mlops/monthly-performance'),
         apiClient.get<SignalStat>(`/api/v1/mlops/signal-stats?days=${statsDays}`),
         apiClient.get<RecentSignal[]>(`/api/v1/mlops/recent-signals?days=${recentDays}${signalFilter ? `&signal=${signalFilter}` : ''}`),
         apiClient.get<TrainHistory[]>('/api/v1/mlops/train-history'),
+        apiClient.get<StockPerf[]>(`/api/v1/mlops/stock-performance?days=${stockDays}`),
       ]);
       setStatus(s.data);
       setMonthly(m.data);
       setStats(st.data);
       setRecent(r.data);
       setHistory(h.data);
+      setStocks(sp.data);
     } catch (e: any) {
       if (e?.response?.status === 401) {
         window.location.href = '/auth';
@@ -121,7 +137,7 @@ const MLOpsDashboard: React.FC = () => {
       setMsg('데이터 로드 실패');
     }
     setLoading(false);
-  }, [statsDays, recentDays, signalFilter, isLoggedIn]);
+  }, [statsDays, recentDays, signalFilter, isLoggedIn, stockDays]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -259,6 +275,50 @@ const MLOpsDashboard: React.FC = () => {
                       <td style={{ textAlign: 'center', padding: '4px 6px' }}>{fmtRet(m.avg_ret)}</td>
                       <td style={{ textAlign: 'center', padding: '4px 6px' }}>{fmtRet(m.max_ret)}</td>
                       <td style={{ textAlign: 'center', padding: '4px 6px' }}>{fmtRet(m.min_ret)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>,
+        { marginBottom: 12 }
+      )}
+
+      {/* 종목별 수익률 */}
+      {card(
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#555' }}>종목별 수익률 (매수→매도 누적)</div>
+            <div style={{ display: 'flex', gap: 3 }}>
+              {[{label:'1M',days:30},{label:'3M',days:90},{label:'6M',days:180},{label:'ALL',days:9999}].map(({label,days}) => (
+                <button key={days} onClick={() => setStockDays(days)} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: stockDays === days ? '#6366f1' : '#1e1e2e', color: stockDays === days ? '#fff' : '#888' }}>{label}</button>
+              ))}
+            </div>
+          </div>
+          {stocks.length === 0 ? (
+            <div style={{ fontSize: 11, color: '#555' }}>데이터 없음</div>
+          ) : (
+            <div style={{ overflowY: 'auto', maxHeight: 320 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+                <thead>
+                  <tr style={{ color: '#555', borderBottom: '1px solid #1e1e2e' }}>
+                    {['종목', '거래', '승률', '평균', '누적', '최대', '최소', '미실현'].map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '3px 5px', fontWeight: 500 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {stocks.map((s, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #13131e' }}>
+                      <td style={{ padding: '3px 5px', color: '#d1d5db' }}>{s.stock_name}</td>
+                      <td style={{ padding: '3px 5px', color: '#6b7280' }}>{s.win}/{s.total}</td>
+                      <td style={{ padding: '3px 5px', color: s.accuracy >= 60 ? '#16a34a' : s.accuracy >= 50 ? '#d97706' : '#dc2626' }}>{s.accuracy.toFixed(0)}%</td>
+                      <td style={{ padding: '3px 5px' }}>{fmtRet(s.avg_ret)}</td>
+                      <td style={{ padding: '3px 5px', fontWeight: 600 }}>{fmtRet(s.cumulative_ret)}</td>
+                      <td style={{ padding: '3px 5px' }}>{fmtRet(s.max_ret)}</td>
+                      <td style={{ padding: '3px 5px' }}>{fmtRet(s.min_ret)}</td>
+                      <td style={{ padding: '3px 5px', color: '#4b5563' }}>{s.unrealized_pct != null ? fmtRet(s.unrealized_pct) : '-'}</td>
                     </tr>
                   ))}
                 </tbody>
