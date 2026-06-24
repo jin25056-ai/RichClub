@@ -104,7 +104,7 @@ const MLOpsDashboard: React.FC = () => {
       const [s, m, st, r, h] = await Promise.all([
         apiClient.get<ModelStatus>('/api/v1/mlops/status'),
         apiClient.get<MonthlyPerf[]>('/api/v1/mlops/monthly-performance'),
-        apiClient.get<SignalStat[]>(`/api/v1/mlops/signal-stats?days=${statsDays}`),
+        apiClient.get<SignalStat>(`/api/v1/mlops/signal-stats?days=${statsDays}`),
         apiClient.get<RecentSignal[]>(`/api/v1/mlops/recent-signals?days=${recentDays}${signalFilter ? `&signal=${signalFilter}` : ''}`),
         apiClient.get<TrainHistory[]>('/api/v1/mlops/train-history'),
       ]);
@@ -137,14 +137,6 @@ const MLOpsDashboard: React.FC = () => {
     } catch { setMsg('학습 실패'); }
     setTrainLoading(false);
   };
-
-  // 월별 데이터를 월 단위로 묶어서 매수/매도/관망 함께 표시
-  const monthlyGrouped = monthly.reduce((acc, m) => {
-    if (!acc[m.month]) acc[m.month] = {};
-    acc[m.month][m.signal] = m;
-    return acc;
-  }, {} as Record<string, Record<string, MonthlyPerf>>);
-  const monthKeys = Object.keys(monthlyGrouped).sort().reverse().slice(0, 12);
 
   return (
     <div style={{ background: '#0a0a14', minHeight: '100vh', padding: '14px 18px', color: '#e2e8f0', fontFamily: 'inherit', boxSizing: 'border-box' }}>
@@ -241,7 +233,7 @@ const MLOpsDashboard: React.FC = () => {
       {/* 월별 성능 */}
       {card(
         <>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#555', marginBottom: 8 }}>월별 성능 ({monthKeys.length}개월)</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#555', marginBottom: 8 }}>월별 성능 ({monthly.length}개월)</div>
           {monthly.length === 0 ? (
             <div style={{ fontSize: 11, color: '#555' }}>월별 집계 없음 (매수→매도 청산 거래 필요)</div>
           ) : (
