@@ -103,13 +103,28 @@ const tipRow = (lbl: string, val: any, color = '#e2e8f0') => val != null ? (
 ) : null;
 const fmt = (v: any) => v != null ? Math.round(v).toLocaleString() : null;
 
+const getMaState = (d: any) => {
+  if (!d || d.ma5 == null || d.ma20 == null || d.ma60 == null) return null;
+  if (d.ma5 > d.ma20 && d.ma20 > d.ma60) return { label: '정배열', color: '#16a34a' };
+  if (d.ma5 < d.ma20 && d.ma20 < d.ma60) return { label: '역배열', color: '#dc2626' };
+  return { label: '혼합', color: '#d97706' };
+};
+
 const CandleTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d || d.open == null) return null;
+  const maState = getMaState(d);
   return (
     <div style={TIP}>
-      <div style={{ color: '#6366f1', marginBottom: 4, fontWeight: 600 }}>{label}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ color: '#6366f1', fontWeight: 600 }}>{label}</span>
+        {maState && (
+          <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: maState.color + '22', color: maState.color, border: '1px solid ' + maState.color + '55', fontWeight: 600 }}>
+            {maState.label}
+          </span>
+        )}
+      </div>
       {tipRow('시가', fmt(d.open))}
       {tipRow('고가', fmt(d.high), '#16a34a')}
       {tipRow('저가', fmt(d.low), '#dc2626')}
@@ -195,14 +210,22 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
 
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
+    const total = chartData.length;
+    if (total === 0) return;
     setViewRange((prev) => {
-      const total = chartData.length;
-      if (total === 0) return prev;
       const cur: [number, number] = prev ?? [0, total - 1];
       const [s, en] = cur;
       const span = en - s;
+      if (e.shiftKey) {
+        const step = Math.max(1, Math.floor(span * 0.15));
+        const shift = e.deltaY > 0 ? step : -step;
+        let ns = s + shift; let ne = en + shift;
+        if (ns < 0) { ns = 0; ne = span; }
+        if (ne >= total) { ne = total - 1; ns = ne - span; }
+        return [Math.max(0, ns), ne];
+      }
       const delta = e.deltaY > 0 ? 1 : -1;
-      const step = Math.max(1, Math.floor(span * 0.1));
+      const step = Math.max(1, Math.floor(span * 0.15));
       const newSpan = Math.min(total - 1, Math.max(10, span + delta * step));
       const ratio = chartWrapRef.current
         ? Math.min(1, Math.max(0, (e.clientX - chartWrapRef.current.getBoundingClientRect().left) / chartWrapRef.current.offsetWidth))
@@ -212,8 +235,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       let ne = ns + newSpan;
       if (ns < 0) { ns = 0; ne = newSpan; }
       if (ne >= total) { ne = total - 1; ns = ne - newSpan; }
-      ns = Math.max(0, ns);
-      return [ns, ne];
+      return [Math.max(0, ns), ne];
     });
   }, [chartData.length]);
 
@@ -231,6 +253,8 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     const cur: [number, number] = viewRange ?? [0, total - 1];
     dragRef.current = { startX: e.clientX, startRange: cur };
     isDragging.current = false;
+    let rafId: number | null = null;
+    let pendingRange: [number, number] | null = null;
     const onMove = (me: MouseEvent) => {
       if (!dragRef.current || !chartWrapRef.current) return;
       const dx = me.clientX - dragRef.current.startX;
@@ -240,15 +264,20 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       const [s, en] = dragRef.current.startRange;
       const span = en - s;
       const shift = Math.round(-(dx / width) * span);
-      let ns = s + shift;
-      let ne = en + shift;
+      let ns = s + shift; let ne = en + shift;
       if (ns < 0) { ns = 0; ne = span; }
       if (ne >= total) { ne = total - 1; ns = ne - span; }
-      ns = Math.max(0, ns);
-      setViewRange([ns, ne]);
+      pendingRange = [Math.max(0, ns), ne];
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          if (pendingRange) setViewRange(pendingRange);
+          rafId = null;
+        });
+      }
     };
     const onUp = () => {
       dragRef.current = null;
+      if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -365,9 +394,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           const spanA = ichi?.spanA ?? null;
           const spanB = ichi?.spanB ?? null;
           return {
-            datetime: futureDate,
-            spanA,
-            spanB,
+            datetime: futureDate, spanA, spanB,
             cloudTop: spanA != null && spanB != null ? Math.max(spanA, spanB) : null,
             cloudBottom: spanA != null && spanB != null ? Math.min(spanA, spanB) : null,
           };
@@ -392,13 +419,17 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     if (!searchOnly) fetchAll(item.stock_code, item.stock_name, externalPeriod ?? period);
   };
 
-  const visData = viewRange ? chartData.slice(viewRange[0], viewRange[1] + 1) : chartData;
-
-  const visAllPrices = visData.flatMap((d: any) =>
-    [d.high, d.low, d.ma5, d.ma20, d.ma60, d.tenkan, d.kijun, d.spanA, d.spanB].filter((v: any) => v != null && !isNaN(v))
+  const visData = React.useMemo(
+    () => viewRange ? chartData.slice(viewRange[0], viewRange[1] + 1) : chartData,
+    [chartData, viewRange]
   );
-  const visPMin = visAllPrices.length ? Math.min(...visAllPrices) * 0.997 : 0;
-  const visPMax = visAllPrices.length ? Math.max(...visAllPrices) * 1.003 : 100;
+
+  const [visPMin, visPMax] = React.useMemo(() => {
+    const prices = visData.flatMap((d: any) =>
+      [d.high, d.low, d.ma5, d.ma20, d.ma60, d.tenkan, d.kijun, d.spanA, d.spanB].filter((v: any) => v != null && !isNaN(v))
+    );
+    return prices.length ? [Math.min(...prices) * 0.997, Math.max(...prices) * 1.003] : [0, 100];
+  }, [visData]);
 
   const CandleShape = makeCandleShape(visPMin, visPMax);
 
@@ -442,14 +473,13 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           onDoubleClick={handleDoubleClick}
           style={{ cursor: 'crosshair', userSelect: 'none' }}
         >
-          {/* 캔들 + 이동평균 + 일목균형표 */}
           <div style={{ fontSize: 10, color: '#666', marginBottom: 2 }}>캔들 + 이동평균 + 일목균형표</div>
           <ResponsiveContainer width="100%" height={heights.candle}>
             <ComposedChart data={visData} syncId={SYNC_ID} margin={MARGIN}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
               <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
               <YAxis domain={[visPMin, visPMax]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
-                tickFormatter={(v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : String(Math.round(v))} />
+                tickFormatter={(v) => v >= 1000000 ? String((v/1000000).toFixed(1)) + 'M' : v >= 1000 ? String((v/1000).toFixed(0)) + 'K' : String(Math.round(v))} />
               <Tooltip content={<CandleTooltip />} />
               <Legend verticalAlign="top" wrapperStyle={{ fontSize: 10, paddingBottom: 2 }}
                 content={() => (
@@ -490,7 +520,6 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* MACD */}
           <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span>MACD</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 14, height: 2, background: '#6366f1', display: 'inline-block' }} />MACD</span>
@@ -514,7 +543,6 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* RSI */}
           <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span>RSI (14)</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 14, height: 2, background: '#6366f1', display: 'inline-block' }} />RSI</span>
