@@ -142,15 +142,121 @@ async def get_ai_predictions(
         query["signal"] = signal
     if stock_name:
         query["stock_name"] = stock_name
+        limit = 10000  # 종목 지정 시 전체 조회
+
     cursor = db.total_trading_signals.find(query).sort("predicted_at", -1).limit(limit)
+    docs = [doc async for doc in cursor]
+
+    # stock_name 지정 시 전체 날짜 반환 (중복 제거 안 함)
+    if stock_name:
+        deduped = docs
+    else:
+        # 종목별 최신 1건만 (중복 제거)
+        seen: set = set()
+        deduped = []
+        for doc in docs:
+            sname = doc.get("stock_name", "")
+            if sname not in seen:
+                seen.add(sname)
+                deduped.append(doc)
+    docs = deduped
+
+    # 종목별 직전 close를 aggregate 한 방에 조회
+    stock_names = list({doc.get("stock_name") for doc in docs if doc.get("stock_name")})
+    prev_close_map: dict = {}
+
+    if stock_names:
+        pipeline = [
+            {"$match": {"stock_name": {"$in": stock_names}, "close": {"$ne": None}}},
+            {"$sort": {"predicted_at": -1}},
+            {"$group": {
+                "_id": "$stock_name",
+                "closes": {"$push": "$close"},
+            }},
+        ]
+        async for row in db.total_trading_signals.aggregate(pipeline):
+            closes = row.get("closes", [])
+            # closes[0] = 최신, closes[1] = 직전
+            prev_close_map[row["_id"]] = closes[1] if len(closes) > 1 else None
+
     result = []
-    async for doc in cursor:
+    for doc in docs:
         signal_str = doc.get("signal", "관망")
         signal_label = {v: k for k, v in SIGNAL_MAP.items()}.get(signal_str, 2)
+        current_price = doc.get("close")
+        sname = doc.get("stock_name", "")
+        prev_close = prev_close_map.get(sname)
+        change_pct = None
+        if current_price and prev_close and prev_close != 0:
+            change_pct = round((current_price - prev_close) / prev_close * 100, 2)
         result.append(AIPredictionItem(
             stock_code=doc.get("stock_code", ""),
-            stock_name=doc.get("stock_name", ""),
-            current_price=doc.get("close"),
+            stock_name=sname,
+            current_price=current_price,
+            change_pct=change_pct,
+            signal=signal_str,
+            signal_label=signal_label,
+            confidence=doc.get("confidence"),
+            predicted_at=doc.get("predicted_at"),
+        ))
+    return result
+
+
+@router.get("/ai/today", response_model=List[AIPredictionItem], summary="오늘 AI 예측 목록")
+async def get_today_predictions(
+    signal: Optional[str] = Query(None, description="매수 / 매도 / 관망"),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """오늘 날짜 기준 AI 예측 목록 (매수/매도 파라미터), 전날 대비 등락률 포함"""
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    query: dict = {"predicted_at": {"$gte": today_start}}
+    if signal in ("매수", "매도", "관망"):
+        query["signal"] = signal
+
+    cursor = db.total_trading_signals.find(query).sort("predicted_at", -1)
+    docs = [doc async for doc in cursor]
+
+    # 종목별 최신 1건만
+    seen: set = set()
+    deduped = []
+    for doc in docs:
+        sname = doc.get("stock_name", "")
+        if sname not in seen:
+            seen.add(sname)
+            deduped.append(doc)
+
+    # 전날 대비 등락률 계산
+    stock_names = list({doc.get("stock_name") for doc in deduped if doc.get("stock_name")})
+    prev_close_map: dict = {}
+    if stock_names:
+        pipeline = [
+            {"$match": {"stock_name": {"$in": stock_names}, "close": {"$ne": None}}},
+            {"$sort": {"predicted_at": -1}},
+            {"$group": {
+                "_id": "$stock_name",
+                "closes": {"$push": "$close"},
+            }},
+        ]
+        async for row in db.total_trading_signals.aggregate(pipeline):
+            closes = row.get("closes", [])
+            prev_close_map[row["_id"]] = closes[1] if len(closes) > 1 else None
+
+    result = []
+    for doc in deduped:
+        signal_str = doc.get("signal", "관망")
+        signal_label = {v: k for k, v in SIGNAL_MAP.items()}.get(signal_str, 2)
+        current_price = doc.get("close")
+        sname = doc.get("stock_name", "")
+        prev_close = prev_close_map.get(sname)
+        change_pct = None
+        if current_price and prev_close and prev_close != 0:
+            change_pct = round((current_price - prev_close) / prev_close * 100, 2)
+        result.append(AIPredictionItem(
+            stock_code=doc.get("stock_code", ""),
+            stock_name=sname,
+            current_price=current_price,
+            change_pct=change_pct,
             signal=signal_str,
             signal_label=signal_label,
             confidence=doc.get("confidence"),
@@ -262,39 +368,21 @@ async def get_macd(
 @router.get("/chart/candle/{stock_code}", response_model=CandleResponse, summary="캔들 차트 데이터")
 async def get_candles(
     stock_code: str,
-    days: int = Query(30, ge=1, le=240),
+    days: int = Query(90, ge=1, le=730),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
     since = datetime.utcnow() - timedelta(days=days)
 
-    # 1) 5분봉 먼저 시도
-    cursor = db.candles_5m.find(
-        {"stock_code": stock_code, "datetime": {"$gte": since}},
-        {"_id": 0, "datetime": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
-    ).sort("datetime", 1)
-    docs = [doc async for doc in cursor]
-    if docs:
-        data = []
-        for d in docs:
-            dt = d["datetime"]
-            dt_str = dt.strftime("%Y-%m-%d %H:%M") if hasattr(dt, "strftime") else str(dt)
-            data.append(CandleDataPoint(
-                datetime=dt_str,
-                open=d.get("open"), high=d.get("high"),
-                low=d.get("low"), close=d.get("close"), volume=d.get("volume"),
-            ))
-        return CandleResponse(stock_code=stock_code, interval="5m", data=data)
-
-    # 2) DB 일봉 - stock_code 또는 stock_name 둘 다 시도
+    # 1) DB 일봉 - stock_code 또는 stock_name 둘 다 시도 (날짜 필터 없이 전체)
     cursor = db.total_trading_signals.find(
-        {"$or": [{"stock_code": stock_code}, {"stock_name": stock_code}], "predicted_at": {"$gte": since}},
+        {"$or": [{"stock_code": stock_code}, {"stock_name": stock_code}]},
         {"_id": 0, "predicted_at": 1, "open": 1, "high": 1, "low": 1, "close": 1,
          "volume": 1, "ma5": 1, "ma20": 1, "ma60": 1}
     ).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]
 
-    if len(docs) >= 5:
+    if len(docs) >= 1:
         data = []
         for d in docs:
             dt = d["predicted_at"]
@@ -310,7 +398,6 @@ async def get_candles(
         return CandleResponse(stock_code=stock_code, interval="1d", data=data)
 
     # 3) DB 데이터 부족 → yfinance 직접 수집
-    # stock_code가 6자리 숫자면 바로 티커로 사용, 아니면 DB에서 조회
     if _is_code(stock_code):
         ticker_code = stock_code
     else:
@@ -331,7 +418,10 @@ async def get_candles(
         if raw.empty:
             return []
         if isinstance(raw.columns, pd.MultiIndex):
-            raw.columns = raw.columns.droplevel(1)
+            if raw.columns.nlevels == 2:
+                raw.columns = raw.columns.get_level_values(0)
+            else:
+                raw.columns = raw.columns.droplevel(-1)
         raw.columns = [c.lower() for c in raw.columns]
         raw = raw.rename(columns={"adj close": "close"})
         raw.index = pd.to_datetime(raw.index)
