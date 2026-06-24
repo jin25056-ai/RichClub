@@ -142,6 +142,7 @@ async def get_ai_predictions(
         query["signal"] = signal
     if stock_name:
         query["stock_name"] = stock_name
+        limit = 10000  # 종목 지정 시 전체 조회
 
     cursor = db.total_trading_signals.find(query).sort("predicted_at", -1).limit(limit)
     docs = [doc async for doc in cursor]
