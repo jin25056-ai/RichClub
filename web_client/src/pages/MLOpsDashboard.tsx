@@ -146,7 +146,6 @@ const MLOpsDashboard: React.FC = () => {
         <button onClick={handleLogout} style={{ fontSize: 10, padding: '2px 8px', background: '#1e1e2e', color: '#9ca3af', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer' }}>
           로그아웃
         </button>
-        <button onClick={load} style={{ fontSize: 10, padding: '2px 7px', background: '#1e1e2e', color: '#888', border: 'none', borderRadius: 4, cursor: 'pointer' }}>새로고침</button>
         <button onClick={handleTrain} disabled={trainLoading} style={{ fontSize: 10, padding: '2px 8px', background: trainLoading ? '#374151' : '#6366f1', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
           {trainLoading ? '학습중...' : '모델 재학습'}
         </button>

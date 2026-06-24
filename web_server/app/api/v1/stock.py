@@ -369,7 +369,10 @@ async def get_candles(
         if raw.empty:
             return []
         if isinstance(raw.columns, pd.MultiIndex):
-            raw.columns = raw.columns.droplevel(1)
+            if raw.columns.nlevels == 2:
+                raw.columns = raw.columns.get_level_values(0)
+            else:
+                raw.columns = raw.columns.droplevel(-1)
         raw.columns = [c.lower() for c in raw.columns]
         raw = raw.rename(columns={"adj close": "close"})
         raw.index = pd.to_datetime(raw.index)
