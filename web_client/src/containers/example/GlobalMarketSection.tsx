@@ -48,9 +48,8 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
   useEffect(() => {
     if (!showInfo) return;
     const handleClick = (e: MouseEvent) => {
-      if (btnRef.current && !btnRef.current.contains(e.target as Node)) {
-        setShowInfo(false);
-      }
+      if (btnRef.current && btnRef.current.contains(e.target as Node)) return;
+      setShowInfo(false);
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
@@ -64,7 +63,6 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
     timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   });
 
-  // 점수 상세 계산
   const itemMap: Record<string, any> = {};
   (data.items || []).forEach((it: any) => { itemMap[it.symbol] = it; });
 
@@ -89,6 +87,11 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
 
   const totalScore = scoreRows.filter((r) => r.triggered).reduce((s, r) => s + r.score, 0);
 
+  // 게이지 계산 (최소 -8 ~ 최대 +8)
+  const GAUGE_MIN = -8; const GAUGE_MAX = 8;
+  const gaugePct = Math.max(2, Math.min(98, ((totalScore - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100));
+  const gaugeColor = totalScore >= 2 ? '#16a34a' : totalScore <= -2 ? '#dc2626' : '#d97706';
+
   if (compact) {
     return (
       <div>
@@ -98,9 +101,9 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
           background: signalColor + '22', border: `1px solid ${signalColor}55`,
           position: 'relative', overflow: 'visible',
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          {/* 신호 + i 버튼 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: signalColor }}>{data.invest_signal}</div>
-            {/* i 버튼 */}
             <div style={{ position: 'relative' }}>
               <button
                 ref={btnRef}
@@ -112,7 +115,7 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
                   display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
                 }}>i</button>
 
-              {/* 상세 팝업 - 우측으로 */}
+              {/* 상세 팝업 */}
               {showInfo && popupPos && (
                 <div style={{
                   position: 'fixed', top: popupPos.top, left: popupPos.left, zIndex: 9999,
@@ -136,25 +139,18 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
                         )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{
-                          fontSize: 9,
-                          color: r.triggered ? (r.score > 0 ? '#16a34a' : '#dc2626') : '#6b7280',
-                        }}>{r.value}</span>
-                        <span style={{
-                          fontSize: 9, fontWeight: 700, minWidth: 24, textAlign: 'right',
-                          color: r.triggered ? (r.score > 0 ? '#16a34a' : '#dc2626') : '#444',
-                        }}>
+                        <span style={{ fontSize: 9, color: r.triggered ? (r.score > 0 ? '#16a34a' : '#dc2626') : '#6b7280' }}>
+                          {r.value}
+                        </span>
+                        <span style={{ fontSize: 9, fontWeight: 700, minWidth: 24, textAlign: 'right', color: r.triggered ? (r.score > 0 ? '#16a34a' : '#dc2626') : '#444' }}>
                           {r.triggered ? (r.score > 0 ? `+${r.score}` : `${r.score}`) : '-'}
                         </span>
                       </div>
                     </div>
                   ))}
-                  <div style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    marginTop: 8, paddingTop: 6, borderTop: '1px solid #2d2d3d',
-                  }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 6, borderTop: '1px solid #2d2d3d' }}>
                     <span style={{ fontSize: 9, color: '#888' }}>합계 점수</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: totalScore >= 2 ? '#16a34a' : totalScore <= -2 ? '#dc2626' : '#d97706' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: gaugeColor }}>
                       {totalScore > 0 ? `+${totalScore}` : totalScore}
                     </span>
                   </div>
@@ -163,6 +159,33 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* 점수 게이지 */}
+          <div style={{ marginTop: 8 }}>
+            <div style={{ position: 'relative', height: 6, background: '#1e1e2e', borderRadius: 3, overflow: 'visible' }}>
+              {/* 배경 그라디언트 */}
+              <div style={{
+                position: 'absolute', inset: 0, borderRadius: 3,
+                background: 'linear-gradient(to right, #7f1d1d, #1a1a2e 45%, #1a1a2e 55%, #14532d)',
+                opacity: 0.7,
+              }} />
+              {/* 중앙 구분선 */}
+              <div style={{ position: 'absolute', top: -2, left: '50%', transform: 'translateX(-50%)', width: 1, height: 10, background: '#555' }} />
+              {/* 현재 점수 인디케이터 */}
+              <div style={{
+                position: 'absolute', top: '50%', left: `${gaugePct}%`,
+                transform: 'translate(-50%, -50%)',
+                width: 10, height: 10, borderRadius: '50%',
+                background: gaugeColor, border: '2px solid #0a0a14',
+                boxShadow: `0 0 8px ${gaugeColor}88`,
+                zIndex: 1,
+              }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
+              <span style={{ fontSize: 8, color: '#dc262688' }}>비우호</span>
+              <span style={{ fontSize: 8, color: '#16a34a88' }}>우호</span>
             </div>
           </div>
         </div>
@@ -178,10 +201,7 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
               <div style={{ fontSize: 11, color: '#d1d5db' }}>
                 {item.price != null ? item.price.toLocaleString() : '-'}
               </div>
-              <div style={{
-                fontSize: 10,
-                color: item.change_pct == null ? '#555' : item.change_pct >= 0 ? '#16a34a' : '#dc2626',
-              }}>
+              <div style={{ fontSize: 10, color: item.change_pct == null ? '#555' : item.change_pct >= 0 ? '#16a34a' : '#dc2626' }}>
                 {item.change_pct != null ? `${item.change_pct >= 0 ? '+' : ''}${item.change_pct.toFixed(2)}%` : '-'}
               </div>
             </div>
