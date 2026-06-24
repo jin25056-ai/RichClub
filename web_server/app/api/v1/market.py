@@ -44,8 +44,8 @@ class TradeRecord(BaseModel):
     buy_price: float
     sell_date: Optional[str] = None
     sell_price: Optional[float] = None
-    return_pct: Optional[float] = None  # 청산된 경우
-    unrealized_pct: Optional[float] = None  # 미청산인 경우
+    return_pct: Optional[float] = None
+    unrealized_pct: Optional[float] = None
 
 
 class WinRateResult(BaseModel):
@@ -58,7 +58,7 @@ class WinRateResult(BaseModel):
     max_return_pct: float
     max_loss_pct: float
     cumulative_return_pct: float
-    unrealized_pct: Optional[float] = None   # 현재 보유 중인 미실현 손익
+    unrealized_pct: Optional[float] = None
     hold_days: int
 
 
@@ -67,7 +67,7 @@ class WinRateResponse(BaseModel):
     stock_name: Optional[str]
     period: str
     results: List[WinRateResult]
-    trades: List[TradeRecord]   # 실제 거래 내역
+    trades: List[TradeRecord]
     updated_at: datetime
 
 
@@ -255,51 +255,76 @@ def _to_date(dt) -> datetime:
     return dt
 
 
-@router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트")
+def _build_winrate_response(
+    stock_code, stock_name, period, hold_days,
+    realized_returns, unrealized_positions, trades, signal_label
+):
+    results = []
+    if realized_returns:
+        win = [r for r in realized_returns if r > 0]
+        lose = [r for r in realized_returns if r <= 0]
+        cumulative = 1.0
+        for r in realized_returns:
+            cumulative *= (1 + r / 100)
+        cumulative_pct = round((cumulative - 1) * 100, 2)
+        avg_unrealized = round(sum(unrealized_positions) / len(unrealized_positions), 2) if unrealized_positions else None
+        results.append(WinRateResult(
+            signal=signal_label,
+            total_signals=len(realized_returns),
+            win_count=len(win),
+            lose_count=len(lose),
+            win_rate=round(len(win) / len(realized_returns) * 100, 1),
+            avg_return_pct=round(sum(realized_returns) / len(realized_returns), 2),
+            max_return_pct=round(max(realized_returns), 2),
+            max_loss_pct=round(min(realized_returns), 2),
+            cumulative_return_pct=cumulative_pct,
+            unrealized_pct=avg_unrealized,
+            hold_days=hold_days,
+        ))
+    elif unrealized_positions:
+        avg_unrealized = round(sum(unrealized_positions) / len(unrealized_positions), 2)
+        results.append(WinRateResult(
+            signal=signal_label + "(보유중)",
+            total_signals=0, win_count=0, lose_count=0, win_rate=0,
+            avg_return_pct=0, max_return_pct=0, max_loss_pct=0,
+            cumulative_return_pct=0, unrealized_pct=avg_unrealized, hold_days=hold_days,
+        ))
+    return WinRateResponse(
+        stock_code=stock_code, stock_name=stock_name, period=period,
+        results=results, trades=trades, updated_at=datetime.now(timezone.utc),
+    )
+
+
+@router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트 (AI)")
 async def get_win_rate(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
     hold_days: int = Query(5, ge=1, le=30),
-    start_date: Optional[str] = Query(None, description="시작일 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="종료일 (YYYY-MM-DD)"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
+    """
+    AI 승률 테스트
+    - 매수: AI 매수 신호
+    - 매도: AI 매도 신호
+    """
     if period not in PERIOD_DAYS_MAP:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
 
-    # start_date/end_date 직접 지정 시 우선 적용
-    if start_date:
-        try:
-            since = _parse_date_input(start_date)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="start_date 형식 오류 (YYMMDD 또는 YYYY-MM-DD)")
-    else:
-        days = PERIOD_DAYS_MAP[period]
-        since = datetime.now(timezone.utc) - timedelta(days=days)
-
-    if end_date:
-        try:
-            until = _parse_date_input(end_date) + timedelta(days=1)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="end_date 형식 오류 (YYMMDD 또는 YYYY-MM-DD)")
-    else:
-        until = datetime.now(timezone.utc) + timedelta(days=1)
+    since = _parse_date_input(start_date) if start_date else datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS_MAP[period])
+    until = (_parse_date_input(end_date) + timedelta(days=1)) if end_date else datetime.now(timezone.utc) + timedelta(days=1)
 
     query: dict = {"predicted_at": {"$gte": since, "$lt": until}}
     if stock_code:
         query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
 
-    cursor = db.total_trading_signals.find(query).sort("predicted_at", 1)
-    docs = [doc async for doc in cursor]
-
+    docs = [doc async for doc in db.total_trading_signals.find(query).sort("predicted_at", 1)]
     if not docs:
         raise HTTPException(status_code=404, detail="해당 기간의 데이터가 없습니다.")
 
     stock_name = docs[0].get("stock_name") if docs else None
-
-    # 종목별로 그룹핑 후 포지션 추적
-    # 매수 신호 → 매수, 매도 신호 → 청산, 관망 → 아무것도 안 함
     sc_docs: dict = defaultdict(list)
     for doc in docs:
         sc = doc.get("stock_code", "")
@@ -308,12 +333,10 @@ async def get_win_rate(
 
     trades: list = []
     realized_returns: list = []
-    unrealized_positions: list = []  # 아직 청산 안 된 포지션
-
-    today_price_map: dict = {}  # 종목별 최신 가격
+    unrealized_positions: list = []
 
     for sc, sdocs in sc_docs.items():
-        position = None  # 현재 보유 포지션: {"buy_date", "buy_price"}
+        position = None
         latest_price = None
 
         for doc in sdocs:
@@ -327,90 +350,29 @@ async def get_win_rate(
             date_str = dt.strftime("%Y-%m-%d")
 
             if signal == "매수" and position is None:
-                # 매수 신호: 포지션 진입
                 position = {"buy_date": date_str, "buy_price": close}
-
             elif signal == "매도" and position is not None:
-                # 매도 신호: 포지션 청산
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
                 trades.append(TradeRecord(
-                    buy_date=position["buy_date"],
-                    buy_price=position["buy_price"],
-                    sell_date=date_str,
-                    sell_price=close,
-                    return_pct=ret_pct,
+                    buy_date=position["buy_date"], buy_price=position["buy_price"],
+                    sell_date=date_str, sell_price=close, return_pct=ret_pct,
                 ))
                 realized_returns.append(ret_pct)
                 position = None
 
-            # 관망은 아무것도 안 함
-
-        # 기간 끝났는데 포지션 남아있으면 미실현 손익
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
             unrealized_positions.append(unrealized_pct)
             trades.append(TradeRecord(
-                buy_date=position["buy_date"],
-                buy_price=position["buy_price"],
-                sell_date=None,
-                sell_price=latest_price,
-                unrealized_pct=unrealized_pct,
+                buy_date=position["buy_date"], buy_price=position["buy_price"],
+                sell_date=None, sell_price=latest_price, unrealized_pct=unrealized_pct,
             ))
 
-    # 결과 집계 (매수 신호 기준으로만)
-    results = []
-    if realized_returns:
-        win = [r for r in realized_returns if r > 0]
-        lose = [r for r in realized_returns if r <= 0]
-
-        cumulative = 1.0
-        for r in realized_returns:
-            cumulative *= (1 + r / 100)
-        cumulative_pct = round((cumulative - 1) * 100, 2)
-
-        avg_unrealized = round(sum(unrealized_positions) / len(unrealized_positions), 2) if unrealized_positions else None
-
-        results.append(WinRateResult(
-            signal="매수→매도",
-            total_signals=len(realized_returns),
-            win_count=len(win),
-            lose_count=len(lose),
-            win_rate=round(len(win) / len(realized_returns) * 100, 1) if realized_returns else 0,
-            avg_return_pct=round(sum(realized_returns) / len(realized_returns), 2),
-            max_return_pct=round(max(realized_returns), 2),
-            max_loss_pct=round(min(realized_returns), 2),
-            cumulative_return_pct=cumulative_pct,
-            unrealized_pct=avg_unrealized,
-            hold_days=hold_days,
-        ))
-    elif unrealized_positions:
-        # 청산된 거래는 없고 미실현만 있는 경우
-        avg_unrealized = round(sum(unrealized_positions) / len(unrealized_positions), 2)
-        results.append(WinRateResult(
-            signal="매수→보유중",
-            total_signals=0,
-            win_count=0,
-            lose_count=0,
-            win_rate=0,
-            avg_return_pct=0,
-            max_return_pct=0,
-            max_loss_pct=0,
-            cumulative_return_pct=0,
-            unrealized_pct=avg_unrealized,
-            hold_days=hold_days,
-        ))
-
-    return WinRateResponse(
-        stock_code=stock_code,
-        stock_name=stock_name,
-        period=period,
-        results=results,
-        trades=trades,
-        updated_at=datetime.now(timezone.utc),
-    )
+    return _build_winrate_response(stock_code, stock_name, period, hold_days,
+                                   realized_returns, unrealized_positions, trades, "매수(AI)→매도(AI)")
 
 
-@router.get("/winrate/simple", response_model=WinRateResponse, summary="단순 승률 테스트 (5일선 꺾임 매도)")
+@router.get("/winrate/simple", response_model=WinRateResponse, summary="승률 테스트 (AI 매수 + 5일선 매도)")
 async def get_win_rate_simple(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
@@ -422,41 +384,24 @@ async def get_win_rate_simple(
 ):
     """
     단순 승률 테스트
-    - 매수 신호: AI 예측 매수 신호와 동일
-    - 매도 신호: 5일선이 상승하다가 꺾이는 날 (ma5 < 전날 ma5)
+    - 매수: AI 매수 신호
+    - 매도: 5일선 꺾임(ma5 < 전날 ma5)
     """
     if period not in PERIOD_DAYS_MAP:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
 
-    if start_date:
-        try:
-            since = _parse_date_input(start_date)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="start_date 형식 오류")
-    else:
-        days = PERIOD_DAYS_MAP[period]
-        since = datetime.now(timezone.utc) - timedelta(days=days)
-
-    if end_date:
-        try:
-            until = _parse_date_input(end_date) + timedelta(days=1)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="end_date 형식 오류")
-    else:
-        until = datetime.now(timezone.utc) + timedelta(days=1)
+    since = _parse_date_input(start_date) if start_date else datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS_MAP[period])
+    until = (_parse_date_input(end_date) + timedelta(days=1)) if end_date else datetime.now(timezone.utc) + timedelta(days=1)
 
     query: dict = {"predicted_at": {"$gte": since, "$lt": until}}
     if stock_code:
         query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
 
-    cursor = db.total_trading_signals.find(query).sort("predicted_at", 1)
-    docs = [doc async for doc in cursor]
-
+    docs = [doc async for doc in db.total_trading_signals.find(query).sort("predicted_at", 1)]
     if not docs:
         raise HTTPException(status_code=404, detail="해당 기간의 데이터가 없습니다.")
 
     stock_name = docs[0].get("stock_name") if docs else None
-
     sc_docs: dict = defaultdict(list)
     for doc in docs:
         sc = doc.get("stock_code", "")
@@ -483,24 +428,16 @@ async def get_win_rate_simple(
             latest_price = close
             date_str = dt.strftime("%Y-%m-%d")
 
-            # 5일선 꺾임 감지: 이전 ma5보다 현재 ma5가 낮아진 경우
-            ma5_turning_down = False
-            if ma5 is not None and prev_ma5 is not None:
-                ma5_turning_down = float(ma5) < float(prev_ma5)
+            ma5_turning_down = (ma5 is not None and prev_ma5 is not None
+                                and float(ma5) < float(prev_ma5))
 
-            # 매수: AI 매수 신호 기준
             if signal == "매수" and position is None:
                 position = {"buy_date": date_str, "buy_price": close}
-
-            # 매도: 5일선 꺾임 (포지션 보유 중일 때만)
             elif ma5_turning_down and position is not None:
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
                 trades.append(TradeRecord(
-                    buy_date=position["buy_date"],
-                    buy_price=position["buy_price"],
-                    sell_date=date_str,
-                    sell_price=close,
-                    return_pct=ret_pct,
+                    buy_date=position["buy_date"], buy_price=position["buy_price"],
+                    sell_date=date_str, sell_price=close, return_pct=ret_pct,
                 ))
                 realized_returns.append(ret_pct)
                 position = None
@@ -508,61 +445,188 @@ async def get_win_rate_simple(
             if ma5 is not None:
                 prev_ma5 = float(ma5)
 
-        # 미실현 포지션
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
             unrealized_positions.append(unrealized_pct)
             trades.append(TradeRecord(
-                buy_date=position["buy_date"],
-                buy_price=position["buy_price"],
-                sell_date=None,
-                sell_price=latest_price,
-                unrealized_pct=unrealized_pct,
+                buy_date=position["buy_date"], buy_price=position["buy_price"],
+                sell_date=None, sell_price=latest_price, unrealized_pct=unrealized_pct,
             ))
 
-    results = []
-    if realized_returns:
-        win = [r for r in realized_returns if r > 0]
-        lose = [r for r in realized_returns if r <= 0]
-        cumulative = 1.0
-        for r in realized_returns:
-            cumulative *= (1 + r / 100)
-        cumulative_pct = round((cumulative - 1) * 100, 2)
-        avg_unrealized = round(sum(unrealized_positions) / len(unrealized_positions), 2) if unrealized_positions else None
-        results.append(WinRateResult(
-            signal="매수(AI)→매도(5일선꺾임)",
-            total_signals=len(realized_returns),
-            win_count=len(win),
-            lose_count=len(lose),
-            win_rate=round(len(win) / len(realized_returns) * 100, 1) if realized_returns else 0,
-            avg_return_pct=round(sum(realized_returns) / len(realized_returns), 2),
-            max_return_pct=round(max(realized_returns), 2),
-            max_loss_pct=round(min(realized_returns), 2),
-            cumulative_return_pct=cumulative_pct,
-            unrealized_pct=avg_unrealized,
-            hold_days=hold_days,
-        ))
-    elif unrealized_positions:
-        avg_unrealized = round(sum(unrealized_positions) / len(unrealized_positions), 2)
-        results.append(WinRateResult(
-            signal="매수(AI)→보유중",
-            total_signals=0,
-            win_count=0,
-            lose_count=0,
-            win_rate=0,
-            avg_return_pct=0,
-            max_return_pct=0,
-            max_loss_pct=0,
-            cumulative_return_pct=0,
-            unrealized_pct=avg_unrealized,
-            hold_days=hold_days,
-        ))
+    return _build_winrate_response(stock_code, stock_name, period, hold_days,
+                                   realized_returns, unrealized_positions, trades,
+                                   "매수(AI)→매도(5일선꺾임)")
 
-    return WinRateResponse(
-        stock_code=stock_code,
-        stock_name=stock_name,
-        period=period,
-        results=results,
-        trades=trades,
-        updated_at=datetime.now(timezone.utc),
-    )
+
+@router.get("/winrate/combined", response_model=WinRateResponse, summary="승률 테스트 (AI+정배열 매수)")
+async def get_win_rate_combined(
+    stock_code: Optional[str] = Query(None),
+    period: str = Query("3m"),
+    hold_days: int = Query(5, ge=1, le=30),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """
+    AI+지표 동시 매수 승률 테스트
+    - 매수: AI 매수 신호 + MA 정배열(ma5>ma20>ma60) 동시 충족
+    - 매도: AI 매도 신호 or MA 역배열(ma5<ma20<ma60)
+    """
+    if period not in PERIOD_DAYS_MAP:
+        raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
+
+    since = _parse_date_input(start_date) if start_date else datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS_MAP[period])
+    until = (_parse_date_input(end_date) + timedelta(days=1)) if end_date else datetime.now(timezone.utc) + timedelta(days=1)
+
+    query: dict = {"predicted_at": {"$gte": since, "$lt": until}}
+    if stock_code:
+        query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
+
+    docs = [doc async for doc in db.total_trading_signals.find(query).sort("predicted_at", 1)]
+    if not docs:
+        raise HTTPException(status_code=404, detail="해당 기간의 데이터가 없습니다.")
+
+    stock_name = docs[0].get("stock_name") if docs else None
+    sc_docs: dict = defaultdict(list)
+    for doc in docs:
+        sc = doc.get("stock_code", "")
+        if sc:
+            sc_docs[sc].append(doc)
+
+    trades: list = []
+    realized_returns: list = []
+    unrealized_positions: list = []
+
+    for sc, sdocs in sc_docs.items():
+        position = None
+        latest_price = None
+
+        for doc in sdocs:
+            signal = doc.get("signal", "관망")
+            dt = _to_date(doc.get("predicted_at"))
+            close = doc.get("close")
+            ma5 = doc.get("ma5")
+            ma20 = doc.get("ma20")
+            ma60 = doc.get("ma60")
+            if close is None:
+                continue
+            close = float(close)
+            latest_price = close
+            date_str = dt.strftime("%Y-%m-%d")
+
+            ma_bullish = (ma5 is not None and ma20 is not None and ma60 is not None
+                          and float(ma5) > float(ma20) > float(ma60))
+            ma_bearish = (ma5 is not None and ma20 is not None and ma60 is not None
+                          and float(ma5) < float(ma20) < float(ma60))
+
+            if signal == "매수" and ma_bullish and position is None:
+                position = {"buy_date": date_str, "buy_price": close}
+            elif position is not None and (signal == "매도" or ma_bearish):
+                ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
+                trades.append(TradeRecord(
+                    buy_date=position["buy_date"], buy_price=position["buy_price"],
+                    sell_date=date_str, sell_price=close, return_pct=ret_pct,
+                ))
+                realized_returns.append(ret_pct)
+                position = None
+
+        if position is not None and latest_price is not None:
+            unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
+            unrealized_positions.append(unrealized_pct)
+            trades.append(TradeRecord(
+                buy_date=position["buy_date"], buy_price=position["buy_price"],
+                sell_date=None, sell_price=latest_price, unrealized_pct=unrealized_pct,
+            ))
+
+    return _build_winrate_response(stock_code, stock_name, period, hold_days,
+                                   realized_returns, unrealized_positions, trades,
+                                   "매수(AI+정배열)→매도(AI or 역배열)")
+
+
+@router.get("/winrate/indicator", response_model=WinRateResponse, summary="승률 테스트 (지표만)")
+async def get_win_rate_indicator(
+    stock_code: Optional[str] = Query(None),
+    period: str = Query("3m"),
+    hold_days: int = Query(5, ge=1, le=30),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """
+    지표만 승률 테스트 (AI 신호 무시)
+    - 매수: MA 정배열 첫 진입 시점(ma5>ma20>ma60)
+    - 매도: MA 역배열 전환 시점(ma5<ma20<ma60)
+    """
+    if period not in PERIOD_DAYS_MAP:
+        raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
+
+    since = _parse_date_input(start_date) if start_date else datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS_MAP[period])
+    until = (_parse_date_input(end_date) + timedelta(days=1)) if end_date else datetime.now(timezone.utc) + timedelta(days=1)
+
+    query: dict = {"predicted_at": {"$gte": since, "$lt": until}}
+    if stock_code:
+        query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
+
+    docs = [doc async for doc in db.total_trading_signals.find(query).sort("predicted_at", 1)]
+    if not docs:
+        raise HTTPException(status_code=404, detail="해당 기간의 데이터가 없습니다.")
+
+    stock_name = docs[0].get("stock_name") if docs else None
+    sc_docs: dict = defaultdict(list)
+    for doc in docs:
+        sc = doc.get("stock_code", "")
+        if sc:
+            sc_docs[sc].append(doc)
+
+    trades: list = []
+    realized_returns: list = []
+    unrealized_positions: list = []
+
+    for sc, sdocs in sc_docs.items():
+        position = None
+        latest_price = None
+        prev_in_bullish = False
+
+        for doc in sdocs:
+            dt = _to_date(doc.get("predicted_at"))
+            close = doc.get("close")
+            ma5 = doc.get("ma5")
+            ma20 = doc.get("ma20")
+            ma60 = doc.get("ma60")
+            if close is None:
+                continue
+            close = float(close)
+            latest_price = close
+            date_str = dt.strftime("%Y-%m-%d")
+
+            ma_bullish = (ma5 is not None and ma20 is not None and ma60 is not None
+                          and float(ma5) > float(ma20) > float(ma60))
+            ma_bearish = (ma5 is not None and ma20 is not None and ma60 is not None
+                          and float(ma5) < float(ma20) < float(ma60))
+
+            if ma_bullish and not prev_in_bullish and position is None:
+                position = {"buy_date": date_str, "buy_price": close}
+            elif ma_bearish and position is not None:
+                ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
+                trades.append(TradeRecord(
+                    buy_date=position["buy_date"], buy_price=position["buy_price"],
+                    sell_date=date_str, sell_price=close, return_pct=ret_pct,
+                ))
+                realized_returns.append(ret_pct)
+                position = None
+
+            prev_in_bullish = ma_bullish
+
+        if position is not None and latest_price is not None:
+            unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
+            unrealized_positions.append(unrealized_pct)
+            trades.append(TradeRecord(
+                buy_date=position["buy_date"], buy_price=position["buy_price"],
+                sell_date=None, sell_price=latest_price, unrealized_pct=unrealized_pct,
+            ))
+
+    return _build_winrate_response(stock_code, stock_name, period, hold_days,
+                                   realized_returns, unrealized_positions, trades,
+                                   "매수(MA정배열)→매도(MA역배열)")
