@@ -143,12 +143,16 @@ async def evaluate_predictions(db: AsyncIOMotorDatabase):
     """
     import asyncio
     now = datetime.now(timezone.utc)
+    now_naive = datetime.utcnow()
     col = db.model_predictions
 
-    # 평가 기한 지났고 아직 미평가된 것
+    # evaluate_at이 naive/aware 혼재할 수 있으므로 둘 다 커버
     cursor = col.find({
         'evaluated': False,
-        'evaluate_at': {'$lte': now},
+        '$or': [
+            {'evaluate_at': {'$lte': now}},
+            {'evaluate_at': {'$lte': now_naive}},
+        ],
         'close_at_prediction': {'$ne': None}
     }).limit(200)
     docs = [doc async for doc in cursor]
@@ -173,7 +177,7 @@ async def evaluate_predictions(db: AsyncIOMotorDatabase):
 
     for (code, eval_str), group_docs in groups.items():
         ticker = code + '.KS'
-        end_str = (datetime.strptime(eval_str, '%Y-%m-%d') + timedelta(days=3)).strftime('%Y-%m-%d')
+        end_str = (datetime.strptime(eval_str, '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
         try:
             raw = await asyncio.get_event_loop().run_in_executor(
                 None,
