@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Bar, Cell, Legend,
 } from 'recharts';
 import { stockApi, StockItem } from '../../api/stock';
@@ -269,6 +269,10 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             kijun:  ichimokuRaw[i].kijun,
             spanA: shiftedIdx >= 0 ? ichimokuRaw[shiftedIdx].spanA : null,
             spanB: shiftedIdx >= 0 ? ichimokuRaw[shiftedIdx].spanB : null,
+            cloudTop: shiftedIdx >= 0 && ichimokuRaw[shiftedIdx].spanA != null && ichimokuRaw[shiftedIdx].spanB != null
+              ? Math.max(ichimokuRaw[shiftedIdx].spanA!, ichimokuRaw[shiftedIdx].spanB!) : null,
+            cloudBottom: shiftedIdx >= 0 && ichimokuRaw[shiftedIdx].spanA != null && ichimokuRaw[shiftedIdx].spanB != null
+              ? Math.min(ichimokuRaw[shiftedIdx].spanA!, ichimokuRaw[shiftedIdx].spanB!) : null,
           };
         }).filter((d) => d.datetime >= cutStr);
 
@@ -312,17 +316,11 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     if (!searchOnly) fetchAll(item.stock_code, item.stock_name, externalPeriod ?? period);
   };
 
-  const candlePrices = chartData.flatMap((d) =>
-    [d.high, d.low, d.ma5, d.ma20, d.ma60].filter((v) => v != null && !isNaN(v))
+  const allPrices = chartData.flatMap((d) =>
+    [d.high, d.low, d.ma5, d.ma20, d.ma60, d.tenkan, d.kijun, d.spanA, d.spanB].filter((v) => v != null && !isNaN(v))
   );
-  const pMin = candlePrices.length ? Math.min(...candlePrices) * 0.997 : 0;
-  const pMax = candlePrices.length ? Math.max(...candlePrices) * 1.003 : 100;
-
-  const ichiPrices = chartData.flatMap((d) =>
-    [d.tenkan, d.kijun, d.spanA, d.spanB].filter((v) => v != null && !isNaN(v))
-  );
-  const iMin = ichiPrices.length ? Math.min(...ichiPrices) * 0.997 : 0;
-  const iMax = ichiPrices.length ? Math.max(...ichiPrices) * 1.003 : 100;
+  const pMin = allPrices.length ? Math.min(...allPrices) * 0.997 : 0;
+  const pMax = allPrices.length ? Math.max(...allPrices) * 1.003 : 100;
 
   const CandleShape = makeCandleShape(pMin, pMax);
 
@@ -367,7 +365,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
               <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
-              <YAxis domain={[Math.min(pMin, iMin), Math.max(pMax, iMax)]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
+              <YAxis domain={[pMin, pMax]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
                 tickFormatter={(v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : String(Math.round(v))} />
               <Tooltip content={<CandleTooltip />} />
               <Legend verticalAlign="top" wrapperStyle={{ fontSize: 10, paddingBottom: 2 }}
@@ -395,8 +393,11 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
               <Line type="monotone" dataKey="ma5"    stroke="#facc15" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
               <Line type="monotone" dataKey="tenkan" stroke="#38bdf8" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
               <Line type="monotone" dataKey="kijun"  stroke="#f472b6" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
-              <Line type="monotone" dataKey="spanA"  stroke="#4ade80" dot={false} strokeWidth={1}   connectNulls legendType="none" strokeDasharray="3 2" />
-              <Line type="monotone" dataKey="spanB"  stroke="#f87171" dot={false} strokeWidth={1}   connectNulls legendType="none" strokeDasharray="3 2" />
+              {/* 구름: spanA~spanB 사이 채우기 */}
+              <Area type="monotone" dataKey="cloudTop"    stroke="none" fill="#4ade80" fillOpacity={0.12} connectNulls legendType="none" baseValue="dataMin" />
+              <Area type="monotone" dataKey="cloudBottom" stroke="none" fill="#0a0a14" fillOpacity={1}    connectNulls legendType="none" baseValue="dataMin" />
+              <Line type="monotone" dataKey="spanA"  stroke="#4ade80" dot={false} strokeWidth={0.8} connectNulls legendType="none" strokeDasharray="3 2" />
+              <Line type="monotone" dataKey="spanB"  stroke="#f87171" dot={false} strokeWidth={0.8} connectNulls legendType="none" strokeDasharray="3 2" />
             </ComposedChart>
           </ResponsiveContainer>
 
