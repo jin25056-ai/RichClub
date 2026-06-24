@@ -107,7 +107,7 @@ const getMaState = (d: any) => {
   if (!d || d.ma5 == null || d.ma20 == null || d.ma60 == null) return null;
   if (d.ma5 > d.ma20 && d.ma20 > d.ma60) return { label: '정배열', color: '#16a34a' };
   if (d.ma5 < d.ma20 && d.ma20 < d.ma60) return { label: '역배열', color: '#dc2626' };
-  return { label: '혼합', color: '#d97706' };
+  return null;
 };
 
 const CandleTooltip = ({ active, payload, label }: any) => {
@@ -142,10 +142,21 @@ const RsiTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d || d.rsi == null) return null;
+  const rsi = d.rsi;
+  const rsiState = rsi >= 70 ? { label: '과매수', color: '#dc2626' }
+    : rsi <= 30 ? { label: '과매도', color: '#16a34a' }
+    : null;
   return (
     <div style={TIP}>
-      <div style={{ color: '#6366f1', marginBottom: 4, fontWeight: 600 }}>{label}</div>
-      {tipRow('RSI', d.rsi?.toFixed(2), '#6366f1')}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ color: '#6366f1', fontWeight: 600 }}>{label}</span>
+        {rsiState && (
+          <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: rsiState.color + '22', color: rsiState.color, border: '1px solid ' + rsiState.color + '55', fontWeight: 600 }}>
+            {rsiState.label}
+          </span>
+        )}
+      </div>
+      {tipRow('RSI', rsi?.toFixed(2), '#6366f1')}
     </div>
   );
 };
@@ -154,12 +165,25 @@ const MacdTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d || d.macd == null) return null;
+  const hist = d.histogram ?? 0;
+  const histState = hist > 0 && d.macd > 0 ? { label: '상승 모멘텀', color: '#16a34a' }
+    : hist < 0 && d.macd < 0 ? { label: '하락 모멘텀', color: '#dc2626' }
+    : hist > 0 ? { label: '반등 시도', color: '#4ade80' }
+    : hist < 0 ? { label: '조정 진행', color: '#f87171' }
+    : null;
   return (
     <div style={TIP}>
-      <div style={{ color: '#6366f1', marginBottom: 4, fontWeight: 600 }}>{label}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ color: '#6366f1', fontWeight: 600 }}>{label}</span>
+        {histState && (
+          <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: histState.color + '22', color: histState.color, border: '1px solid ' + histState.color + '55', fontWeight: 600 }}>
+            {histState.label}
+          </span>
+        )}
+      </div>
       {tipRow('MACD',      fmt(d.macd),      '#6366f1')}
       {tipRow('시그널',    fmt(d.macdSignal), '#f59e0b')}
-      {tipRow('히스토그램', fmt(d.histogram),  (d.histogram ?? 0) >= 0 ? '#16a34a' : '#dc2626')}
+      {tipRow('히스토그램', fmt(d.histogram),  hist >= 0 ? '#16a34a' : '#dc2626')}
     </div>
   );
 };
