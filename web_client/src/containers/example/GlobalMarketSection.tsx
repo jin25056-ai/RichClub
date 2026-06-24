@@ -10,10 +10,13 @@ interface Props {
 }
 
 const SCORE_RULES: Record<string, { label: string; conditions: { desc: string; score: number; check?: (pct: number) => boolean; checkPrice?: (p: number) => boolean }[] }> = {
-  '^IXIC':    { label: '나스닥',    conditions: [{ desc: '+1% 이상', score: +2, check: (p) => p >= 1.0 }, { desc: '-1% 이하', score: -2, check: (p) => p <= -1.0 }] },
-  '^VIX':     { label: 'VIX',      conditions: [{ desc: '15 미만', score: +1, checkPrice: (p) => p < 15 }, { desc: '25 초과', score: -2, checkPrice: (p) => p > 25 }] },
-  'USDKRW=X': { label: '달러/원',  conditions: [{ desc: '-0.5% 이하 (원화강세)', score: +1, check: (p) => p <= -0.5 }, { desc: '+1% 이상 (원화약세)', score: -1, check: (p) => p >= 1.0 }] },
-  'CL=F':     { label: 'WTI 원유', conditions: [{ desc: '+3% 이상 급등', score: -1, check: (p) => p >= 3.0 }] },
+  '^IXIC':    { label: '나스닥',          conditions: [{ desc: '+1% 이상', score: +2, check: (p) => p >= 1.0 }, { desc: '-1% 이하', score: -2, check: (p) => p <= -1.0 }] },
+  '^GSPC':    { label: 'S&P500',          conditions: [{ desc: '+1% 이상', score: +1, check: (p) => p >= 1.0 }, { desc: '-1% 이하', score: -1, check: (p) => p <= -1.0 }] },
+  '^SOX':     { label: '필라델피아 반도체', conditions: [{ desc: '+2% 이상', score: +1, check: (p) => p >= 2.0 }, { desc: '-2% 이하', score: -1, check: (p) => p <= -2.0 }] },
+  '^VIX':     { label: 'VIX',             conditions: [{ desc: '15 미만', score: +1, checkPrice: (p) => p < 15 }, { desc: '25 초과', score: -2, checkPrice: (p) => p > 25 }] },
+  'USDKRW=X': { label: '달러/원',          conditions: [{ desc: '-0.5% 이하 (원화강세)', score: +1, check: (p) => p <= -0.5 }, { desc: '+1% 이상 (원화약세)', score: -1, check: (p) => p >= 1.0 }] },
+  'CL=F':     { label: 'WTI 원유',        conditions: [{ desc: '+3% 이상 급등', score: -1, check: (p) => p >= 3.0 }] },
+  'GC=F':     { label: '금',              conditions: [{ desc: '+1% 이상 (위험회피)', score: -1, check: (p) => p >= 1.0 }] },
 };
 
 const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
@@ -156,8 +159,7 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
                     </span>
                   </div>
                   <div style={{ marginTop: 6, fontSize: 8, color: '#444', lineHeight: 1.4 }}>
-                    +2 이상 매수 우호 / -2 이하 매수 비우호 / 그 외 중립<br />
-                    금(GC=F)은 표시만, 점수 미포함
+                    +2 이상 매수 우호 / -2 이하 매수 비우호 / 그 외 중립
                   </div>
                 </div>
               )}
