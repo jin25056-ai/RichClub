@@ -148,8 +148,8 @@ const MLOpsDashboard: React.FC = () => {
             { label: '마지막 정확도', value: status.last_accuracy != null ? `${(status.last_accuracy * 100).toFixed(1)}%` : '-', color: '#6366f1' },
             { label: '누적 예측', value: `${status.total_predictions.toLocaleString()}건`, color: '#e2e8f0' },
             { label: '평가 대기', value: `${status.pending_evaluation.toLocaleString()}건`, color: status.pending_evaluation > 100 ? '#d97706' : '#6b7280' },
-          ].map((item) => card(
-            <>
+          ].map((item, idx) => (
+            <div key={idx} style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '14px 16px' }}>
               <div style={{ fontSize: 9, color: '#555', marginBottom: 4 }}>{item.label}</div>
               <div style={{ fontSize: 18, fontWeight: 700, color: item.color }}>{item.value}</div>
               {item.label === '모델 상태' && status.last_trained_at && (
@@ -157,8 +157,7 @@ const MLOpsDashboard: React.FC = () => {
                   마지막 학습: {fmtDate(status.last_trained_at)}
                 </div>
               )}
-            </>,
-            {}
+            </div>
           ))}
         </div>
       )}
