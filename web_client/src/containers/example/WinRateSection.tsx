@@ -85,22 +85,18 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
   return (
     <div>
       {/* AI / 단순 탭 */}
-      <div style={{ display: 'flex', gap: 3, marginBottom: 4 }}>
-        {([['ai', 'AI'], ['simple', '단순']] as const).map(([t, label]) => (
-          <button key={t} onClick={() => handleTab(t)}
-            style={{
-              padding: '3px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer',
-              background: tab === t ? '#6366f1' : '#1e1e2e',
-              color: tab === t ? '#fff' : '#888', fontWeight: tab === t ? 600 : 400,
-            }}>{label}</button>
-        ))}
-      </div>
-      {/* 매도 규칙 표시 */}
-      <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 8, paddingLeft: 2 }}>
-        매도규칙 {tab === 'ai'
-          ? <span style={{ color: '#6366f1' }}>AI 매도 시그널</span>
-          : <span style={{ color: '#d97706' }}>단순지표 (5일선 이탈)</span>
-        }
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontSize: 9, color: '#555' }}>매도규칙</span>
+        <div style={{ display: 'flex', gap: 3 }}>
+          {([['ai', 'AI'] , ['simple', '단순지표(5일선)']] as const).map(([t, label]) => (
+            <button key={t} onClick={() => handleTab(t)}
+              style={{
+                padding: '3px 8px', fontSize: 9, borderRadius: 4, border: 'none', cursor: 'pointer',
+                background: tab === t ? '#6366f1' : '#1e1e2e',
+                color: tab === t ? '#fff' : '#888', fontWeight: tab === t ? 600 : 400,
+              }}>{label}</button>
+          ))}
+        </div>
       </div>
 
       {/* 기간 선택 */}
@@ -136,15 +132,16 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
         </div>
       </div>
 
-      {loading && <div style={{ fontSize: 11, color: '#666' }}>불러오는 중...</div>}
+      {loading && <div style={{ fontSize: 9, color: '#444', marginBottom: 4 }}>불러오는 중...</div>}
 
-      {!loading && completedTrades.length === 0 && openTrades.length === 0 && (
+      <div style={{ opacity: loading ? 0.4 : 1, transition: 'opacity 0.15s' }}>
+      {completedTrades.length === 0 && openTrades.length === 0 && (
         <div style={{ fontSize: 10, color: '#555', textAlign: 'center', padding: '16px 0' }}>
           해당 기간 매수 신호 없음
         </div>
       )}
 
-      {!loading && (completedTrades.length > 0 || openTrades.length > 0) && (
+      {(completedTrades.length > 0 || openTrades.length > 0) && (
         <>
           {/* 거래 내역 */}
           <div style={{ marginBottom: 10 }}>
@@ -256,6 +253,7 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
           )}
         </>
       )}
+      </div>
     </div>
   );
 };
