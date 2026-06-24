@@ -12,17 +12,19 @@ const fmtKRW = (n: number) => {
   return n.toLocaleString();
 };
 
+const pctColor = (v: number) => v >= 0 ? '#16a34a' : '#dc2626';
+const pctStr = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+
 const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
   const [period, setPeriod] = useState('3m');
-  const [holdDays, setHoldDays] = useState(5);
   const [results, setResults] = useState<WinRateResult[]>([]);
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [inputAmt, setInputAmt] = useState('1000000');
 
-  const fetchData = (p: string, hd: number, sc?: string) => {
+  const fetchData = (p: string, sc?: string) => {
     setLoading(true);
-    marketApi.getWinRate({ stock_code: sc || undefined, period: p, hold_days: hd })
+    marketApi.getWinRate({ stock_code: sc || undefined, period: p, hold_days: 5 })
       .then((res) => {
         setResults(res.data.results);
         setTrades(res.data.trades || []);
@@ -32,144 +34,161 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
   };
 
   useEffect(() => {
-    if (stockCode) fetchData(period, holdDays, stockCode);
+    if (stockCode) fetchData(period, stockCode);
   }, [stockCode]);
 
   const r = results[0] ?? null;
   const cumPct = r?.cumulative_return_pct ?? null;
-  const cumColor = cumPct != null && cumPct >= 0 ? '#16a34a' : '#dc2626';
+  const completedTrades = trades.filter((t) => t.return_pct != null);
+  const openTrades = trades.filter((t) => t.unrealized_pct != null);
 
   const principal = parseFloat(inputAmt.replace(/,/g, '')) || 0;
   const finalAmt = cumPct != null && principal > 0 ? principal * (1 + cumPct / 100) : null;
   const profit = finalAmt != null ? finalAmt - principal : null;
 
-  // 미실현 손익
-  const unrealized = r?.unrealized_pct ?? null;
+  if (!compact) return null;
 
-  const completedTrades = trades.filter((t) => t.return_pct != null);
-  const openTrades = trades.filter((t) => t.unrealized_pct != null);
+  return (
+    <div>
+      {/* 분석 기간 */}
+      <div style={{ display: 'flex', gap: 3, marginBottom: 10, alignItems: 'center' }}>
+        <span style={{ fontSize: 9, color: '#555' }}>기간</span>
+        {(['1m', '3m', '6m', 'all'] as const).map((p) => (
+          <button key={p} onClick={() => { setPeriod(p); fetchData(p, stockCode); }}
+            style={{
+              padding: '2px 6px', fontSize: 10, borderRadius: 3, border: 'none', cursor: 'pointer',
+              background: period === p ? '#6366f1' : '#1e1e2e',
+              color: period === p ? '#fff' : '#888',
+            }}>{p}</button>
+        ))}
+      </div>
 
-  if (compact) {
-    return (
-      <div>
-        {/* 필터 */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: 9, color: '#555', marginRight: 2 }}>분석기간</span>
-          {(['1m', '3m', '6m', 'all'] as const).map((p) => (
-            <button key={p}
-              onClick={() => { setPeriod(p); fetchData(p, holdDays, stockCode); }}
-              style={{
-                padding: '2px 6px', fontSize: 10, borderRadius: 3, border: 'none', cursor: 'pointer',
-                background: period === p ? '#6366f1' : '#1e1e2e',
-                color: period === p ? '#fff' : '#888',
-              }}>{p}</button>
-          ))}
+      {loading && <div style={{ fontSize: 11, color: '#666' }}>불러오는 중...</div>}
+
+      {!loading && completedTrades.length === 0 && openTrades.length === 0 && (
+        <div style={{ fontSize: 10, color: '#555', textAlign: 'center', padding: '16px 0' }}>
+          해당 기간 매수 신호 없음
         </div>
+      )}
 
-        {loading && <div style={{ fontSize: 11, color: '#666' }}>불러오는 중...</div>}
+      {!loading && (completedTrades.length > 0 || openTrades.length > 0) && (
+        <>
+          {/* 거래 내역 */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 9, color: '#555', marginBottom: 5 }}>거래 내역</div>
 
-        {!loading && (
-          <>
-            {/* 청산 수익률 */}
-            {r && completedTrades.length > 0 && (
-              <div style={{ textAlign: 'center', marginBottom: 8, padding: '8px 0', borderBottom: '1px solid #1e1e2e' }}>
-                <div style={{ fontSize: 22, fontWeight: 700, color: cumColor, lineHeight: 1 }}>
-                  {cumPct != null ? `${cumPct >= 0 ? '+' : ''}${cumPct.toFixed(1)}%` : '-'}
+            {completedTrades.map((t, i) => (
+              <div key={i} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '5px 8px', marginBottom: 3, borderRadius: 5,
+                background: (t.return_pct ?? 0) >= 0 ? '#14532d22' : '#7f1d1d22',
+              }}>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 9, color: '#6b7280', flexWrap: 'nowrap' }}>
+                  <span style={{ color: '#16a34a', fontWeight: 600 }}>B</span>
+                  <span>{t.buy_date}</span>
+                  <span style={{ color: '#555' }}>→</span>
+                  <span style={{ color: '#dc2626', fontWeight: 600 }}>S</span>
+                  <span>{t.sell_date}</span>
                 </div>
-                <div style={{ fontSize: 9, color: '#4b5563', marginTop: 2 }}>
-                  {period} 동안 매수→매도 신호 따랐을 때 누적 수익률
+                <span style={{ fontSize: 12, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 6 }}>
+                  {pctStr(t.return_pct ?? 0)}
+                </span>
+              </div>
+            ))}
+
+            {openTrades.map((t, i) => (
+              <div key={i} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '5px 8px', marginBottom: 3, borderRadius: 5,
+                background: '#0d0d1a',
+                border: '1px dashed #2d2d3d',
+              }}>
+                <div style={{ fontSize: 9, color: '#6b7280' }}>
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <span style={{ color: '#16a34a', fontWeight: 600 }}>B</span>
+                    <span>{t.buy_date}</span>
+                    <span style={{ color: '#555' }}>→</span>
+                    <span style={{ color: '#555' }}>보유중</span>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 4 }}>
-                  <span style={{ fontSize: 9, color: '#6b7280' }}>{r.win_count}승 {r.lose_count}패</span>
-                  <span style={{ fontSize: 9, color: '#6b7280' }}>적중 {r.win_rate.toFixed(0)}%</span>
-                  <span style={{ fontSize: 9, color: r.avg_return_pct >= 0 ? '#16a34a' : '#dc2626' }}>
-                    건당 평균 {r.avg_return_pct >= 0 ? '+' : ''}{r.avg_return_pct.toFixed(2)}%
-                  </span>
+                <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 6 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: pctColor(t.unrealized_pct ?? 0) }}>
+                    {pctStr(t.unrealized_pct ?? 0)}
+                  </div>
+                  <div style={{ fontSize: 8, color: '#4b5563' }}>미실현</div>
                 </div>
               </div>
-            )}
+            ))}
+          </div>
 
-            {/* 미실현 손익 */}
-            {openTrades.length > 0 && (
-              <div style={{
-                background: '#0d0d1a', borderRadius: 6, padding: '6px 10px', marginBottom: 8,
-                border: `1px solid ${(unrealized ?? 0) >= 0 ? '#16a34a33' : '#dc262633'}`,
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 9, color: '#555' }}>현재 보유 ({openTrades.length}건)</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: (unrealized ?? 0) >= 0 ? '#16a34a' : '#dc2626' }}>
-                    미실현 {unrealized != null ? `${unrealized >= 0 ? '+' : ''}${unrealized.toFixed(2)}%` : '-'}
-                  </span>
-                </div>
-                {openTrades.slice(0, 2).map((t, i) => (
-                  <div key={i} style={{ fontSize: 9, color: '#555', marginTop: 2 }}>
-                    {t.buy_date} 매수 → 현재 {t.unrealized_pct != null ? `${t.unrealized_pct >= 0 ? '+' : ''}${t.unrealized_pct.toFixed(2)}%` : '-'}
-                  </div>
+          {/* 청산 요약 */}
+          {completedTrades.length > 0 && r && (
+            <div style={{
+              background: '#0d0d1a', borderRadius: 6, padding: '8px 10px', marginBottom: 10,
+              border: `1px solid ${pctColor(cumPct ?? 0)}44`,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                <span style={{ fontSize: 9, color: '#555' }}>청산 {completedTrades.length}건 누적</span>
+                <span style={{ fontSize: 18, fontWeight: 700, color: pctColor(cumPct ?? 0) }}>
+                  {cumPct != null ? pctStr(cumPct) : '-'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ fontSize: 9, color: '#6b7280' }}>{r.win_count}승 {r.lose_count}패</span>
+                <span style={{ fontSize: 9, color: '#6b7280' }}>적중 {r.win_rate.toFixed(0)}%</span>
+                <span style={{ fontSize: 9, color: '#6b7280' }}>평균 {pctStr(r.avg_return_pct)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* 투자금 시뮬레이션 */}
+          {cumPct != null && (
+            <div>
+              <div style={{ fontSize: 9, color: '#555', marginBottom: 5 }}>만약 이대로 투자했다면?</div>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                <input value={inputAmt}
+                  onChange={(e) => setInputAmt(e.target.value.replace(/[^0-9]/g, ''))}
+                  style={{
+                    flex: 1, background: '#1e1e2e', border: '1px solid #2d2d3d',
+                    borderRadius: 4, padding: '4px 6px', fontSize: 10, color: '#e2e8f0', outline: 'none',
+                  }}
+                  placeholder="투자금 입력" />
+                <span style={{ fontSize: 10, color: '#555', alignSelf: 'center' }}>원</span>
+              </div>
+              <div style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
+                {[100, 500, 1000, 5000].map((w) => (
+                  <button key={w} onClick={() => setInputAmt(String(w * 10000))}
+                    style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: '#1e1e2e', color: '#888' }}>
+                    {w}만
+                  </button>
                 ))}
               </div>
-            )}
-
-            {/* 데이터 없음 */}
-            {!loading && completedTrades.length === 0 && openTrades.length === 0 && (
-              <div style={{ fontSize: 10, color: '#555', textAlign: 'center', padding: '10px 0' }}>
-                해당 기간 매수 신호 없음
-              </div>
-            )}
-
-            {/* 시뮬레이션 */}
-            {cumPct != null && (
-              <>
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 9, color: '#555', marginBottom: 4 }}>투자금 시뮬레이션</div>
-                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                    <input value={inputAmt}
-                      onChange={(e) => setInputAmt(e.target.value.replace(/[^0-9]/g, ''))}
-                      style={{
-                        flex: 1, background: '#1e1e2e', border: '1px solid #2d2d3d',
-                        borderRadius: 4, padding: '4px 6px', fontSize: 10, color: '#e2e8f0', outline: 'none',
-                      }}
-                      placeholder="투자금 (원)" />
-                    <span style={{ fontSize: 10, color: '#555', flexShrink: 0 }}>원</span>
+              {principal > 0 && (
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '7px 10px', background: '#0d0d1a', borderRadius: 5,
+                  border: `1px solid ${pctColor(cumPct ?? 0)}33`,
+                }}>
+                  <div>
+                    <div style={{ fontSize: 9, color: '#555' }}>{fmtKRW(principal)}원 투자</div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: pctColor(profit ?? 0), marginTop: 1 }}>
+                      {profit != null ? `${profit >= 0 ? '+' : ''}${fmtKRW(Math.round(profit))}원` : '-'}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
-                    {[100, 500, 1000, 5000].map((w) => (
-                      <button key={w} onClick={() => setInputAmt(String(w * 10000))}
-                        style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: '#1e1e2e', color: '#888' }}>
-                        {w}만
-                      </button>
-                    ))}
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 9, color: '#555' }}>최종금액</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: pctColor(cumPct ?? 0), marginTop: 1 }}>
+                      {finalAmt != null ? `${fmtKRW(Math.round(finalAmt))}원` : '-'}
+                    </div>
                   </div>
                 </div>
-
-                {principal > 0 && (
-                  <div style={{ background: '#0d0d1a', borderRadius: 6, padding: '8px 10px', border: `1px solid ${cumColor}44` }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span style={{ fontSize: 9, color: '#555' }}>투자원금</span>
-                      <span style={{ fontSize: 10, color: '#9ca3af' }}>{fmtKRW(principal)}원</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span style={{ fontSize: 9, color: '#555' }}>수익/손실</span>
-                      <span style={{ fontSize: 10, fontWeight: 600, color: profit != null && profit >= 0 ? '#16a34a' : '#dc2626' }}>
-                        {profit != null ? `${profit >= 0 ? '+' : ''}${fmtKRW(Math.round(profit))}원` : '-'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 4, borderTop: '1px solid #1e1e2e' }}>
-                      <span style={{ fontSize: 9, color: '#555' }}>최종금액</span>
-                      <span style={{ fontSize: 12, color: cumColor, fontWeight: 700 }}>
-                        {finalAmt != null ? `${fmtKRW(Math.round(finalAmt))}원` : '-'}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </>
-        )}
-      </div>
-    );
-  }
-
-  return null;
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 };
 
 export default WinRateSection;
