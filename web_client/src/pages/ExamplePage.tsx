@@ -12,6 +12,7 @@ const ExamplePage: React.FC = () => {
   const [selectedStock, setSelectedStock] = useState<{ code: string; name: string } | null>(null);
   const [currentName, setCurrentName] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period>('3m');
+  const [sellMode, setSellMode] = useState<'ai' | 'simple'>('ai');
 
   useEffect(() => {
     stockApi.getPredictions('매수', 1).then((res) => {
@@ -86,13 +87,13 @@ const ExamplePage: React.FC = () => {
                 </span>
               )}
             </div>
-            <WinRateSection compact stockCode={selectedStock?.code} />
+            <WinRateSection compact stockCode={selectedStock?.code} onTabChange={setSellMode} />
           </div>
         </div>
 
         {/* 가운데: 차트 */}
         <div style={{ flex: 1, minWidth: 0, background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '8px 12px', overflow: 'hidden' }}>
-          <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} />
+          <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} />
         </div>
 
         {/* 우측: AI 예측 목록 */}
