@@ -81,7 +81,32 @@ const MLOpsDashboard: React.FC = () => {
     setLoading(false);
   };
 
+  const runEvaluate = async (silent = false) => {
+    try {
+      await apiClient.post('/api/v1/mlops/evaluate');
+      if (!silent) setMsg('평가 완료');
+      // 평가 후 데이터 새로고침
+      const [s, st, r] = await Promise.all([
+        apiClient.get<ModelStatus>('/api/v1/mlops/status'),
+        apiClient.get<PredictionStats[]>(`/api/v1/mlops/prediction-stats?days=${statsDays}`),
+        apiClient.get<RecentPrediction[]>(`/api/v1/mlops/recent-predictions?days=${recentDays}${signalFilter ? `&signal=${signalFilter}` : ''}`),
+      ]);
+      setStatus(s.data);
+      setStats(st.data);
+      setRecent(r.data);
+    } catch (e) {
+      if (!silent) setMsg('평가 실패 - 로그인 확인');
+    }
+  };
+
   useEffect(() => { load(); }, [statsDays, recentDays, signalFilter]);
+
+  // 페이지 로드 시 자동 평가 실행
+  useEffect(() => {
+    if (localStorage.getItem('access_token')) {
+      runEvaluate(true);
+    }
+  }, []);
 
   const handleTrain = async () => {
     setTrainLoading(true);
@@ -96,15 +121,7 @@ const MLOpsDashboard: React.FC = () => {
     setTrainLoading(false);
   };
 
-  const handleEvaluate = async () => {
-    try {
-      await apiClient.post('/api/v1/mlops/evaluate');
-      setMsg('평가 완료');
-      load();
-    } catch (e) {
-      setMsg('평가 실패');
-    }
-  };
+  const handleEvaluate = () => runEvaluate();
 
   const card = (children: React.ReactNode, style?: React.CSSProperties) => (
     <div style={{
@@ -124,6 +141,19 @@ const MLOpsDashboard: React.FC = () => {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <h1 style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', margin: 0 }}>MLOps 대시보드</h1>
+        <div style={{
+          fontSize: 10, padding: '2px 8px', borderRadius: 12,
+          background: localStorage.getItem('access_token') ? '#14532d' : '#7f1d1d',
+          color: localStorage.getItem('access_token') ? '#16a34a' : '#dc2626',
+        }}>
+          {localStorage.getItem('access_token') ? '로그인됨' : '미로그인'}
+        </div>
+        {!localStorage.getItem('access_token') && (
+          <button onClick={() => window.location.href = '/auth'}
+            style={{ fontSize: 10, padding: '2px 8px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+            로그인하기
+          </button>
+        )}
         <button onClick={load} style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#888', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
           새로고침
         </button>

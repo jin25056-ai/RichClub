@@ -53,6 +53,16 @@ const ExamplePage: React.FC = () => {
             )}
           </span>
         )}
+        <div style={{ marginLeft: 'auto' }}>
+          <button
+            onClick={() => window.open('/mlops', '_blank')}
+            style={{
+              fontSize: 10, padding: '3px 8px', background: '#1e1e2e',
+              color: '#6b7280', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer',
+            }}>
+            MLOps
+          </button>
+        </div>
       </div>
 
       {/* 메인 레이아웃 */}
