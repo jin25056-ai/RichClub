@@ -194,7 +194,7 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
         {data.items.map((item) => (
           <div key={item.symbol} style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '4px 0', borderBottom: '1px solid #13131e',
+            padding: '2px 0', borderBottom: '1px solid #13131e',
           }}>
             <span style={{ fontSize: 10, color: '#888' }}>{item.name}</span>
             <div style={{ textAlign: 'right' }}>
@@ -208,7 +208,7 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
           </div>
         ))}
 
-        <div style={{ marginTop: 6, fontSize: 9, color: '#444', textAlign: 'right', whiteSpace: 'nowrap' }}>
+        <div style={{ marginTop: 4, fontSize: 9, color: '#444', textAlign: 'right', whiteSpace: 'nowrap' }}>
           {updatedAt} KST 기준
         </div>
       </div>
