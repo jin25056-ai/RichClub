@@ -110,102 +110,115 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
 
 async def calculate_returns(db: AsyncIOMotorDatabase):
     """
-    total_trading_signals 내에서 종목별로
-    +1일/+5일/+20일/+60일 후 close를 같은 컬렉션에서 찾아서 수익률 업데이트
-    수익률이 없는 것들만 처리 (매일 돌려도 안전)
+    total_trading_signals에서 종목별 매수→매도 포지션 추적으로 수익률 계산
+    market.py get_win_rate와 동일한 로직
+    결과를 각 매수 신호 도큐먼트에 ret_realized / is_correct 필드로 저장
     """
+    from collections import defaultdict
+    from pymongo import UpdateOne
+
     col = db.total_trading_signals
-
-    # ret_5d가 없고 predicted_at이 충분히 과거인 것들 처리 (5일 이상 지난 것)
-    cutoff = datetime.utcnow() - timedelta(days=5)
-    cursor = col.find({
-        'ret_5d': None,
-        'close': {'$ne': None},
-        'predicted_at': {'$lte': cutoff}
-    }).limit(1000)
-    docs = [doc async for doc in cursor]
-
-    if not docs:
-        logger.info("[returns] 계산할 데이터 없음")
+    # ret_realized가 없는 매수 신호 중 청산 가능한 것 처리
+    # 전체 종목별로 그룹핑
+    pipeline = [
+        {'$match': {'signal': {'$in': ['매수', '매도']}}},
+        {'$group': {'_id': '$stock_code', 'count': {'$sum': 1}}},
+    ]
+    codes = [doc['_id'] async for doc in col.aggregate(pipeline)]
+    if not codes:
+        logger.info("[returns] 매수/매도 신호 없음")
         return
 
-    logger.info(f"[returns] 수익률 계산 대상: {len(docs)}건")
+    logger.info(f"[returns] {len(codes)}개 종목 포지션 추적 시작")
     bulk_ops = []
+    total_updated = 0
 
-    for doc in docs:
-        name = doc.get('stock_name')
-        base_close = doc.get('close')
-        predicted_at = doc.get('predicted_at')
-        signal = doc.get('signal', '관망')
-
-        if not base_close or not predicted_at:
+    for code in codes:
+        if not code:
+            continue
+        # 종목의 모든 신호를 날짜순으로 조회
+        cursor = col.find(
+            {'stock_code': code, 'signal': {'$in': ['매수', '매도']}},
+            sort=[('predicted_at', 1)]
+        )
+        docs = [doc async for doc in cursor]
+        if not docs:
             continue
 
-        # predicted_at을 naive datetime으로 통일
-        if hasattr(predicted_at, 'tzinfo') and predicted_at.tzinfo:
-            predicted_at = predicted_at.replace(tzinfo=None)
+        position = None
+        for doc in docs:
+            signal = doc.get('signal')
+            close = doc.get('close')
+            predicted_at = doc.get('predicted_at')
+            if close is None or predicted_at is None:
+                continue
+            close = float(close)
 
-        ret = {}
-        for days, key in [(1, 'ret_1d'), (5, 'ret_5d'), (20, 'ret_20d'), (60, 'ret_60d')]:
-            target_dt = predicted_at + timedelta(days=days)
-            # target_dt 이후 가장 가까운 거래일 데이터 조회 (최대 7일 이내)
-            future = await col.find_one(
-                {
-                    'stock_name': name,
-                    'predicted_at': {'$gte': target_dt, '$lte': target_dt + timedelta(days=7)},
-                    'close': {'$ne': None}
-                },
-                sort=[('predicted_at', 1)],
+            if signal == '매수' and position is None:
+                position = {'doc_id': doc['_id'], 'buy_price': close, 'buy_date': predicted_at}
+
+            elif signal == '매도' and position is not None:
+                ret_pct = round((close - position['buy_price']) / position['buy_price'] * 100, 2)
+                is_correct = ret_pct > 0
+                bulk_ops.append(UpdateOne(
+                    {'_id': position['doc_id']},
+                    {'$set': {
+                        'ret_realized': ret_pct,
+                        'is_correct': is_correct,
+                        'sell_date': predicted_at,
+                        'sell_price': close,
+                    }}
+                ))
+                total_updated += 1
+                position = None
+
+        # 미청산 포지션
+        if position is not None:
+            # 최신 종가로 미실현 수익률
+            latest = await col.find_one(
+                {'stock_code': code, 'close': {'$ne': None}},
+                sort=[('predicted_at', -1)],
                 projection={'close': 1}
             )
-            if future and future.get('close'):
-                ret[key] = round((float(future['close']) - float(base_close)) / float(base_close) * 100, 2)
-            else:
-                ret[key] = None
-
-        # 5일 수익률 기준 신호 적중 여부
-        if ret.get('ret_5d') is not None:
-            r = ret['ret_5d']
-            if signal == '매수':
-                is_correct = r > 0
-            elif signal == '매도':
-                is_correct = r < 0
-            else:
-                is_correct = abs(r) <= 1.0
-            ret['is_correct_5d'] = is_correct
-
-        bulk_ops.append(UpdateOne({'_id': doc['_id']}, {'$set': ret}))
+            if latest and latest.get('close'):
+                latest_close = float(latest['close'])
+                unrealized_pct = round((latest_close - position['buy_price']) / position['buy_price'] * 100, 2)
+                bulk_ops.append(UpdateOne(
+                    {'_id': position['doc_id']},
+                    {'$set': {'ret_unrealized': unrealized_pct, 'is_correct': None}}
+                ))
 
     if bulk_ops:
         result = await col.bulk_write(bulk_ops, ordered=False)
-        logger.info(f"[returns] 수익률 업데이트: {result.modified_count}건")
+        logger.info(f"[returns] 포지션 수익률 업데이트: {result.modified_count}건")
+    else:
+        logger.info("[returns] 업데이트할 항목 없음")
 
 
 async def aggregate_monthly_performance(db: AsyncIOMotorDatabase):
     """
-    total_trading_signals에서 월별 성능 집계 → model_performance_monthly 저장
-    매월 1일 자동 실행
+    total_trading_signals에서 매수→매도 실현 수익률 기반 월별 집계
+    → model_performance_monthly 저장
     """
     pipeline = [
-        {'$match': {'ret_5d': {'$ne': None}, 'is_correct_5d': {'$ne': None}}},
+        {'$match': {'signal': '매수', 'ret_realized': {'$ne': None}}},
         {'$group': {
             '_id': {
                 'year': {'$year': '$predicted_at'},
                 'month': {'$month': '$predicted_at'},
-                'signal': '$signal',
             },
             'total': {'$sum': 1},
-            'correct': {'$sum': {'$cond': ['$is_correct_5d', 1, 0]}},
-            'avg_ret_5d': {'$avg': '$ret_5d'},
-            'avg_ret_1d': {'$avg': '$ret_1d'},
-            'avg_ret_20d': {'$avg': '$ret_20d'},
+            'correct': {'$sum': {'$cond': ['$is_correct', 1, 0]}},
+            'avg_ret': {'$avg': '$ret_realized'},
+            'max_ret': {'$max': '$ret_realized'},
+            'min_ret': {'$min': '$ret_realized'},
         }},
-        {'$sort': {'_id.year': 1, '_id.month': 1, '_id.signal': 1}},
+        {'$sort': {'_id.year': 1, '_id.month': 1}},
     ]
     col_monthly = db.model_performance_monthly
     results = [doc async for doc in db.total_trading_signals.aggregate(pipeline)]
-
     if not results:
+        logger.info("[monthly] 집계할 실현 수익률 없음")
         return
 
     bulk_ops = []
@@ -215,25 +228,24 @@ async def aggregate_monthly_performance(db: AsyncIOMotorDatabase):
         total = r['total']
         correct = r['correct']
         bulk_ops.append(UpdateOne(
-            {'month': month_str, 'signal': ym['signal']},
+            {'month': month_str},
             {'$set': {
                 'month': month_str,
                 'year': ym['year'],
                 'month_num': ym['month'],
-                'signal': ym['signal'],
                 'total': total,
                 'correct': correct,
                 'accuracy': round(correct / total * 100, 1) if total > 0 else 0,
-                'avg_ret_5d': round(r.get('avg_ret_5d') or 0, 2),
-                'avg_ret_1d': round(r.get('avg_ret_1d') or 0, 2),
-                'avg_ret_20d': round(r.get('avg_ret_20d') or 0, 2),
+                'avg_ret': round(r.get('avg_ret') or 0, 2),
+                'max_ret': round(r.get('max_ret') or 0, 2),
+                'min_ret': round(r.get('min_ret') or 0, 2),
                 'updated_at': datetime.utcnow(),
             }},
             upsert=True
         ))
 
     await col_monthly.bulk_write(bulk_ops, ordered=False)
-    logger.info(f"[monthly] 월별 성능 집계 완료: {len(results)}건")
+    logger.info(f"[monthly] 월별 성능 집계 완료: {len(results)}개월")
 
 
 async def check_and_retrain(db: AsyncIOMotorDatabase):

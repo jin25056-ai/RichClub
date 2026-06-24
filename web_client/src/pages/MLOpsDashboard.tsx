@@ -12,22 +12,21 @@ interface ModelStatus {
 
 interface MonthlyPerf {
   month: string;
-  signal: string;
   total: number;
   correct: number;
   accuracy: number;
-  avg_ret_5d: number;
-  avg_ret_1d: number;
+  avg_ret: number;
+  max_ret: number;
+  min_ret: number;
 }
 
 interface SignalStat {
-  signal: string;
   total: number;
   correct: number;
   accuracy: number;
-  avg_ret_1d: number;
-  avg_ret_5d: number;
-  avg_ret_20d: number;
+  avg_ret: number;
+  max_ret: number;
+  min_ret: number;
 }
 
 interface RecentSignal {
@@ -74,7 +73,7 @@ const card = (children: React.ReactNode, style?: React.CSSProperties) => (
 const MLOpsDashboard: React.FC = () => {
   const [status, setStatus] = useState<ModelStatus | null>(null);
   const [monthly, setMonthly] = useState<MonthlyPerf[]>([]);
-  const [stats, setStats] = useState<SignalStat[]>([]);
+  const [stats, setStats] = useState<SignalStat>({ total: 0, correct: 0, accuracy: 0, avg_ret: 0, max_ret: 0, min_ret: 0 });
   const [recent, setRecent] = useState<RecentSignal[]>([]);
   const [history, setHistory] = useState<TrainHistory[]>([]);
   const [statsDays, setStatsDays] = useState(90);
@@ -193,25 +192,27 @@ const MLOpsDashboard: React.FC = () => {
                 ))}
               </div>
             </div>
-            {stats.length === 0 ? (
-              <div style={{ fontSize: 11, color: '#555' }}>수익률 데이터 없음 (수익률 계산 버튼 클릭)</div>
-            ) : stats.map(s => (
-              <div key={s.signal} style={{ marginBottom: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 3, background: SIG_BG[s.signal], color: SIG_COLOR[s.signal] }}>{s.signal}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: s.accuracy >= 60 ? '#16a34a' : s.accuracy >= 50 ? '#d97706' : '#dc2626' }}>{s.accuracy.toFixed(1)}%</span>
+            {stats.total === 0 ? (
+              <div style={{ fontSize: 11, color: '#555' }}>실현된 거래 없음</div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, color: '#9ca3af' }}>매수→매도 실현 거래</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: stats.accuracy >= 60 ? '#16a34a' : stats.accuracy >= 50 ? '#d97706' : '#dc2626' }}>
+                    {stats.accuracy.toFixed(1)}%
+                  </span>
                 </div>
-                <div style={{ height: 4, background: '#1e1e2e', borderRadius: 2, marginBottom: 3 }}>
-                  <div style={{ height: 4, width: `${s.accuracy}%`, background: SIG_COLOR[s.signal], borderRadius: 2 }} />
+                <div style={{ height: 4, background: '#1e1e2e', borderRadius: 2, marginBottom: 6 }}>
+                  <div style={{ height: 4, width: `${stats.accuracy}%`, background: '#16a34a', borderRadius: 2 }} />
                 </div>
-                <div style={{ fontSize: 9, color: '#555', display: 'flex', gap: 8 }}>
-                  <span>{s.correct}/{s.total}건</span>
-                  <span>1일: {s.avg_ret_1d >= 0 ? '+' : ''}{s.avg_ret_1d.toFixed(1)}%</span>
-                  <span>5일: {s.avg_ret_5d >= 0 ? '+' : ''}{s.avg_ret_5d.toFixed(1)}%</span>
-                  <span>20일: {s.avg_ret_20d >= 0 ? '+' : ''}{s.avg_ret_20d.toFixed(1)}%</span>
+                <div style={{ fontSize: 9, color: '#555', display: 'flex', gap: 10 }}>
+                  <span>{stats.correct}/{stats.total}건 적중</span>
+                  <span>평균 수익: {stats.avg_ret >= 0 ? '+' : ''}{stats.avg_ret.toFixed(2)}%</span>
+                  <span>최대: +{stats.max_ret.toFixed(1)}%</span>
+                  <span>최소: {stats.min_ret.toFixed(1)}%</span>
                 </div>
               </div>
-            ))}
+            )}
           </>
         )}
 
@@ -241,44 +242,34 @@ const MLOpsDashboard: React.FC = () => {
       {card(
         <>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#555', marginBottom: 8 }}>월별 성능 ({monthKeys.length}개월)</div>
-          {monthKeys.length === 0 ? (
-            <div style={{ fontSize: 11, color: '#555' }}>월별 집계 없음 (수익률 계산 후 자동 생성)</div>
+          {monthly.length === 0 ? (
+            <div style={{ fontSize: 11, color: '#555' }}>월별 집계 없음 (매수→매도 청산 거래 필요)</div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                 <thead>
                   <tr style={{ color: '#555', borderBottom: '1px solid #1e1e2e' }}>
                     <th style={{ textAlign: 'left', padding: '3px 6px' }}>월</th>
-                    {['매수', '매도', '관망'].map(s => (
-                      <React.Fragment key={s}>
-                        <th style={{ textAlign: 'center', padding: '3px 6px', color: SIG_COLOR[s] }}>{s} 승률</th>
-                        <th style={{ textAlign: 'center', padding: '3px 6px', color: SIG_COLOR[s] }}>{s} 5일평균</th>
-                      </React.Fragment>
-                    ))}
+                    <th style={{ textAlign: 'center', padding: '3px 6px' }}>거래수</th>
+                    <th style={{ textAlign: 'center', padding: '3px 6px' }}>승률</th>
+                    <th style={{ textAlign: 'center', padding: '3px 6px' }}>평균 수익</th>
+                    <th style={{ textAlign: 'center', padding: '3px 6px' }}>최대</th>
+                    <th style={{ textAlign: 'center', padding: '3px 6px' }}>최소</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {monthKeys.map(month => {
-                    const g = monthlyGrouped[month];
-                    return (
-                      <tr key={month} style={{ borderBottom: '1px solid #13131e' }}>
-                        <td style={{ padding: '4px 6px', color: '#9ca3af' }}>{month}</td>
-                        {['매수', '매도', '관망'].map(s => {
-                          const d = g[s];
-                          return (
-                            <React.Fragment key={s}>
-                              <td style={{ textAlign: 'center', padding: '4px 6px', color: d ? (d.accuracy >= 60 ? '#16a34a' : d.accuracy >= 50 ? '#d97706' : '#dc2626') : '#4b5563' }}>
-                                {d ? `${d.accuracy.toFixed(0)}% (${d.correct}/${d.total})` : '-'}
-                              </td>
-                              <td style={{ textAlign: 'center', padding: '4px 6px' }}>
-                                {d ? fmtRet(d.avg_ret_5d) : <span style={{ color: '#4b5563' }}>-</span>}
-                              </td>
-                            </React.Fragment>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
+                  {[...monthly].sort((a, b) => b.month.localeCompare(a.month)).slice(0, 12).map(m => (
+                    <tr key={m.month} style={{ borderBottom: '1px solid #13131e' }}>
+                      <td style={{ padding: '4px 6px', color: '#9ca3af' }}>{m.month}</td>
+                      <td style={{ textAlign: 'center', padding: '4px 6px', color: '#6b7280' }}>{m.total}</td>
+                      <td style={{ textAlign: 'center', padding: '4px 6px', color: m.accuracy >= 60 ? '#16a34a' : m.accuracy >= 50 ? '#d97706' : '#dc2626' }}>
+                        {m.accuracy.toFixed(0)}% ({m.correct}/{m.total})
+                      </td>
+                      <td style={{ textAlign: 'center', padding: '4px 6px' }}>{fmtRet(m.avg_ret)}</td>
+                      <td style={{ textAlign: 'center', padding: '4px 6px' }}>{fmtRet(m.max_ret)}</td>
+                      <td style={{ textAlign: 'center', padding: '4px 6px' }}>{fmtRet(m.min_ret)}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
