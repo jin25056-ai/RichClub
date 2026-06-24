@@ -7,6 +7,7 @@ const SIGNAL_COLOR: Record<string, string> = {
 
 interface Props {
   compact?: boolean;
+  onUpdatedAt?: (s: string) => void;
 }
 
 const SCORE_RULES: Record<string, { label: string; conditions: { desc: string; score: number; check?: (pct: number) => boolean; checkPrice?: (p: number) => boolean }[] }> = {
@@ -19,7 +20,7 @@ const SCORE_RULES: Record<string, { label: string; conditions: { desc: string; s
   'GC=F':     { label: '금',              conditions: [{ desc: '+1% 이상 (위험회피)', score: -1, check: (p) => p >= 1.0 }] },
 };
 
-const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
+const GlobalMarketSection: React.FC<Props> = ({ compact, onUpdatedAt }) => {
   const [data, setData] = useState<GlobalMarketResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [showInfo, setShowInfo] = useState(false);
@@ -37,7 +38,13 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
   useEffect(() => {
     const load = () => {
       marketApi.getGlobal()
-        .then((res) => setData(res.data))
+        .then((res) => {
+          setData(res.data);
+          const at = new Date(res.data.updated_at).toLocaleString('ko-KR', {
+            timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+          });
+          onUpdatedAt?.(at);
+        })
         .finally(() => setLoading(false));
     };
     load();
@@ -169,7 +176,7 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
               <div style={{
                 position: 'absolute', inset: 0, borderRadius: 3,
                 background: 'linear-gradient(to right, #7f1d1d, #1a1a2e 45%, #1a1a2e 55%, #14532d)',
-                opacity: 0.7,
+                opacity: 1,
               }} />
               {/* 중앙 구분선 */}
               <div style={{ position: 'absolute', top: -2, left: '50%', transform: 'translateX(-50%)', width: 1, height: 10, background: '#555' }} />
@@ -184,8 +191,8 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
               }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
-              <span style={{ fontSize: 8, color: '#dc262688' }}>비우호</span>
-              <span style={{ fontSize: 8, color: '#16a34a88' }}>우호</span>
+              <span style={{ fontSize: 8, color: '#dc2626' }}>비우호</span>
+              <span style={{ fontSize: 8, color: '#16a34a' }}>우호</span>
             </div>
           </div>
         </div>
@@ -197,20 +204,17 @@ const GlobalMarketSection: React.FC<Props> = ({ compact }) => {
             padding: '2px 0', borderBottom: '1px solid #13131e',
           }}>
             <span style={{ fontSize: 10, color: '#888' }}>{item.name}</span>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, color: '#d1d5db' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, textAlign: 'right' }}>
+              <span style={{ fontSize: 10, color: '#d1d5db' }}>
                 {item.price != null ? item.price.toLocaleString() : '-'}
-              </div>
-              <div style={{ fontSize: 10, color: item.change_pct == null ? '#555' : item.change_pct >= 0 ? '#16a34a' : '#dc2626' }}>
+              </span>
+              <span style={{ fontSize: 10, color: item.change_pct == null ? '#555' : item.change_pct >= 0 ? '#16a34a' : '#dc2626', minWidth: 46 }}>
                 {item.change_pct != null ? `${item.change_pct >= 0 ? '+' : ''}${item.change_pct.toFixed(2)}%` : '-'}
-              </div>
+              </span>
             </div>
           </div>
         ))}
 
-        <div style={{ marginTop: 4, fontSize: 9, color: '#444', textAlign: 'right', whiteSpace: 'nowrap' }}>
-          {updatedAt} KST 기준
-        </div>
       </div>
     );
   }

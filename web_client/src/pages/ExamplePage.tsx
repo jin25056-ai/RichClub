@@ -13,6 +13,7 @@ const ExamplePage: React.FC = () => {
   const [currentName, setCurrentName] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period>('3m');
   const [sellMode, setSellMode] = useState<'ai' | 'simple'>('ai');
+  const [marketUpdatedAt, setMarketUpdatedAt] = useState<string | null>(null);
 
   useEffect(() => {
     stockApi.getPredictions('매수', 1).then((res) => {
@@ -72,8 +73,11 @@ const ExamplePage: React.FC = () => {
         {/* 좌측 */}
         <div style={{ width: 190, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
           <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px' }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 8 }}>글로벌 시장</div>
-            <GlobalMarketSection compact />
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>글로벌 시장</span>
+              {marketUpdatedAt && <span style={{ fontSize: 8, color: '#444', fontWeight: 400 }}>{marketUpdatedAt} KST</span>}
+            </div>
+            <GlobalMarketSection compact onUpdatedAt={setMarketUpdatedAt} />
           </div>
           <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 8 }}>
