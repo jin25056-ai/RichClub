@@ -31,17 +31,12 @@ const ExamplePage: React.FC = () => {
   return (
     <div style={{ background: '#0a0a14', height: '100vh', overflow: 'hidden', padding: '10px 14px', fontFamily: 'inherit', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
 
-      {/* 상단: 타이틀 + 검색창 + 기간 버튼 + 종목명 */}
+      {/* 상단 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexShrink: 0, height: 36 }}>
         <h1 style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', margin: 0, flexShrink: 0 }}>RichClub AI</h1>
-        <StockSearchSection
-          initialStock={selectedStock}
-          onStockChange={handleSelectStock}
-          searchOnly
-        />
+        <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} searchOnly />
         {(['1m', '3m', '6m'] as Period[]).map((p) => (
-          <button key={p}
-            onClick={() => setPeriod(p)}
+          <button key={p} onClick={() => setPeriod(p)}
             style={{
               padding: '4px 10px', fontSize: 11, borderRadius: 5, border: 'none', cursor: 'pointer',
               background: period === p ? '#6366f1' : '#1e1e2e',
@@ -55,40 +50,33 @@ const ExamplePage: React.FC = () => {
         )}
       </div>
 
-      {/* 메인 레이아웃 (남은 높이 전부 사용) */}
+      {/* 메인 레이아웃 */}
       <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
 
-        {/* 좌측: 글로벌 시장 + 승률 */}
+        {/* 좌측 */}
         <div style={{ width: 190, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
           <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px' }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 8 }}>글로벌 시장</div>
             <GlobalMarketSection compact />
           </div>
           <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px' }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 8 }}>승률 테스트</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#666' }}>승률 테스트</span>
+              {currentName && (
+                <span style={{ fontSize: 9, color: '#6366f1' }}>— {currentName}</span>
+              )}
+            </div>
             <WinRateSection compact stockCode={selectedStock?.code} />
           </div>
         </div>
 
-        {/* 가운데: 차트 (스크롤 없음) */}
-        <div style={{
-          flex: 1, minWidth: 0, background: '#0f0f1a', border: '1px solid #1e1e2e',
-          borderRadius: 8, padding: '8px 12px', overflow: 'hidden',
-        }}>
-          <StockSearchSection
-            initialStock={selectedStock}
-            onStockChange={handleSelectStock}
-            chartOnly
-            period={period}
-          />
+        {/* 가운데: 차트 */}
+        <div style={{ flex: 1, minWidth: 0, background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '8px 12px', overflow: 'hidden' }}>
+          <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} />
         </div>
 
         {/* 우측: AI 예측 목록 */}
-        <div style={{
-          width: 195, flexShrink: 0,
-          background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8,
-          display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        }}>
+        <div style={{ width: 195, flexShrink: 0, background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ padding: '8px 10px', borderBottom: '1px solid #1e1e2e', fontSize: 11, fontWeight: 600, color: '#666', flexShrink: 0 }}>
             AI 예측 목록
           </div>
