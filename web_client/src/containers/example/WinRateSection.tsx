@@ -25,10 +25,10 @@ const inputStyle: React.CSSProperties = {
 };
 
 const TABS: { key: TabType; label: string; desc: string }[] = [
-  { key: 'ai',        label: 'AI',       desc: '매수: AI 신호  /  매도: AI 신호' },
-  { key: 'simple',    label: '5일선',    desc: '매수: AI 신호  /  매도: 5일선 꺾임' },
-  { key: 'combined',  label: 'AI+지표',  desc: '매수: AI + MA 정배열 동시  /  매도: AI or MA 역배열' },
-  { key: 'indicator', label: '지표만',   desc: '매수: MA 정배열 진입  /  매도: MA 역배열 전환' },
+  { key: 'ai',        label: 'AI',      desc: '매수: AI 신호  /  매도: AI 신호' },
+  { key: 'simple',    label: '5일선',   desc: '매수: AI 신호  /  매도: 5일선 꺾임' },
+  { key: 'combined',  label: 'AI+지표', desc: '매수: AI + MA 정배열 동시  /  매도: AI or MA 역배열' },
+  { key: 'indicator', label: '지표',    desc: '매수: MA 정배열 진입  /  매도: MA 역배열 전환' },
 ];
 
 const getApiFn = (t: TabType) => {
@@ -104,20 +104,19 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode, onTabChange }) =>
   return (
     <div>
       {/* 탭 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <span style={{ fontSize: 9, color: '#555' }}>전략</span>
-        <div style={{ display: 'flex', gap: 3 }}>
+      <div style={{ marginBottom: 4 }}>
+        <div style={{ display: 'flex', gap: 3, marginBottom: 4 }}>
           {TABS.map(({ key, label }) => (
             <button key={key} onClick={() => handleTab(key)}
               style={{
-                padding: '3px 7px', fontSize: 9, borderRadius: 4, border: 'none', cursor: 'pointer',
+                flex: 1, padding: '4px 0', fontSize: 9, borderRadius: 4, border: 'none', cursor: 'pointer',
                 background: tab === key ? '#6366f1' : '#1e1e2e',
                 color: tab === key ? '#fff' : '#888', fontWeight: tab === key ? 600 : 400,
               }}>{label}</button>
           ))}
         </div>
+        <div style={{ fontSize: 9, color: '#4b5563' }}>{activeDesc}</div>
       </div>
-      <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 8 }}>{activeDesc}</div>
 
       {/* 기간 선택 */}
       <div style={{ marginBottom: 8 }}>
