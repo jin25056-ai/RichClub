@@ -137,7 +137,7 @@ XGBoost 모델 자동 학습 (yfinance로 KOSPI 50종목 2년치 수집)
 
 ## MLOps 대시보드
 
-관리자용 대시보드: `https://richclub.efforthye.dev/mlops` (로그인 필요)
+관리자용 대시보드: `/mlops` (로그인 필요, 프론트 Vercel 배포 후 활성화)
 
 - 모델 현황 (모델 존재 여부, 마지막 정확도, 수익률 계산 진행 상황)
 - 기간별 신호 성능 (30/60/90/180일, 매수/매도/관망 승률 및 평균 수익률)
@@ -218,7 +218,6 @@ docker compose up -d
 | API 문서 | https://richclub.efforthye.dev/docs |
 | Jenkins | https://jenkins.efforthye.dev |
 | 프론트엔드 | https://rich-club-front-end.vercel.app |
-| MLOps 대시보드 | https://rich-club-front-end.vercel.app/mlops |
 
 ### Docker 이미지
 - DockerHub: `efforthye/richclub-api:latest`
