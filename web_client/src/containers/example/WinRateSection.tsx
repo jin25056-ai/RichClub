@@ -35,7 +35,9 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
   };
 
   useEffect(() => {
-    fetchData(period, holdDays, stockCode);
+    if (stockCode) {
+      fetchData(period, holdDays, stockCode);
+    }
   }, [stockCode]);
 
   const totalCumPct = results.length > 0 && results.every((r) => r.cumulative_return_pct != null)
