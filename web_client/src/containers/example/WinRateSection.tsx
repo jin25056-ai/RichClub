@@ -28,6 +28,17 @@ const WinRateSection: React.FC<Props> = ({ compact }) => {
 
   useEffect(() => { fetchData('3m', 5); }, []);
 
+  // 전체 누적 수익률: 서버값 있으면 복리 합산, 없으면 평균수익 단순 합산
+  const totalCumPct = results.length > 0
+    ? results.reduce((acc, r) => {
+        const cum = r.cumulative_return_pct;
+        if (cum != null) return acc * (1 + cum / 100);
+        return acc;
+      }, 1.0)
+    : null;
+  const totalPct = totalCumPct != null ? (totalCumPct - 1) * 100 : null;
+  const totalColor = totalPct != null && totalPct >= 0 ? '#16a34a' : '#dc2626';
+
   if (compact) {
     return (
       <div>
@@ -52,67 +63,49 @@ const WinRateSection: React.FC<Props> = ({ compact }) => {
         {loading && <div style={{ fontSize: 11, color: '#666' }}>불러오는 중...</div>}
 
         {!loading && results.length > 0 && (
-          <div>
-            {results.map((r) => {
-              // 누적 수익률: 서버에서 오면 사용, 없으면 avg * total 로 단순 추정
-              const cumPct = r.cumulative_return_pct ?? r.avg_return_pct * r.total_signals;
-              const cumColor = cumPct >= 0 ? '#16a34a' : '#dc2626';
-              return (
-                <div key={r.signal} style={{
-                  background: '#0d0d1a', border: `1px solid ${SIGNAL_COLOR[r.signal]}33`,
-                  borderRadius: 6, padding: '8px 10px', marginBottom: 6,
+          <>
+            {/* 전체 합산 누적 수익률 크게 */}
+            <div style={{
+              textAlign: 'center', marginBottom: 10,
+              padding: '10px 0', borderBottom: '1px solid #1e1e2e',
+            }}>
+              {totalPct != null ? (
+                <>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: totalColor, lineHeight: 1 }}>
+                    {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(1)}%
+                  </div>
+                  <div style={{ fontSize: 9, color: '#4b5563', marginTop: 3 }}>
+                    {period} 동안 신호 전부 따랐을 때 누적 수익률
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 9, color: '#555' }}>집계 중...</div>
+              )}
+            </div>
+
+            {/* 신호별 소형 요약 */}
+            {results.map((r) => (
+              <div key={r.signal} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '5px 2px', borderBottom: '1px solid #13131e',
+              }}>
+                <span style={{
+                  fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                  background: SIGNAL_BG[r.signal], color: SIGNAL_COLOR[r.signal], flexShrink: 0,
+                }}>{r.signal}</span>
+                <span style={{ fontSize: 10, color: '#6b7280' }}>
+                  적중 {r.win_rate.toFixed(0)}%
+                </span>
+                <span style={{
+                  fontSize: 10, fontWeight: 600,
+                  color: r.avg_return_pct >= 0 ? '#16a34a' : '#dc2626',
                 }}>
-                  {/* 헤더 */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 3,
-                      background: SIGNAL_BG[r.signal], color: SIGNAL_COLOR[r.signal],
-                    }}>{r.signal}</span>
-                    <span style={{ fontSize: 9, color: '#555' }}>{r.total_signals}건 · {holdDays}일</span>
-                  </div>
-
-                  {/* 누적 수익률 - 가장 크게 */}
-                  <div style={{ textAlign: 'center', marginBottom: 8 }}>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: cumColor, lineHeight: 1 }}>
-                      {cumPct >= 0 ? '+' : ''}{cumPct.toFixed(1)}%
-                    </div>
-                    <div style={{ fontSize: 9, color: '#4b5563', marginTop: 2 }}>
-                      신호 그대로 따랐을 때 {period} 누적 수익률
-                    </div>
-                  </div>
-
-                  {/* 적중률 + 평균 수익 */}
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-                    <div style={{ flex: 1, textAlign: 'center', background: '#0a0a14', borderRadius: 4, padding: '4px 0' }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: SIGNAL_COLOR[r.signal] }}>
-                        {r.win_rate.toFixed(0)}%
-                      </div>
-                      <div style={{ fontSize: 9, color: '#555' }}>적중률</div>
-                    </div>
-                    <div style={{ flex: 1, textAlign: 'center', background: '#0a0a14', borderRadius: 4, padding: '4px 0' }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: r.avg_return_pct >= 0 ? '#16a34a' : '#dc2626' }}>
-                        {r.avg_return_pct >= 0 ? '+' : ''}{r.avg_return_pct.toFixed(2)}%
-                      </div>
-                      <div style={{ fontSize: 9, color: '#555' }}>건당 평균</div>
-                    </div>
-                  </div>
-
-                  {/* 최대 수익/손실 */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 9, color: '#16a34a' }}>
-                      최대 +{(r.max_return_pct ?? 0).toFixed(1)}%
-                    </span>
-                    <span style={{ fontSize: 9, color: '#6b7280' }}>
-                      {r.win_count}승 {r.lose_count}패
-                    </span>
-                    <span style={{ fontSize: 9, color: '#dc2626' }}>
-                      최대 {(r.max_loss_pct ?? 0).toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                  {r.avg_return_pct >= 0 ? '+' : ''}{r.avg_return_pct.toFixed(2)}%
+                </span>
+                <span style={{ fontSize: 9, color: '#555' }}>{r.total_signals}건</span>
+              </div>
+            ))}
+          </>
         )}
       </div>
     );
