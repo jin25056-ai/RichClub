@@ -92,6 +92,12 @@ const MLOpsDashboard: React.FC = () => {
     }
   }, [isLoggedIn]);
 
+  const handleLogout = () => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    window.location.href = '/auth';
+  };
+
   const load = useCallback(async () => {
     if (!isLoggedIn) return;
     setLoading(true);
@@ -108,25 +114,19 @@ const MLOpsDashboard: React.FC = () => {
       setStats(st.data);
       setRecent(r.data);
       setHistory(h.data);
-    } catch (e) {
-      setMsg('데이터 로드 실패 - 로그인 확인');
+    } catch (e: any) {
+      if (e?.response?.status === 401) {
+        window.location.href = '/auth';
+        return;
+      }
+      setMsg('데이터 로드 실패');
     }
     setLoading(false);
   }, [statsDays, recentDays, signalFilter, isLoggedIn]);
 
   useEffect(() => { load(); }, [load]);
 
-  // 페이지 로드 시 자동으로 수익률 계산 트리거
-  useEffect(() => {
-    if (!isLoggedIn) return;
-    apiClient.post('/api/v1/mlops/calculate-returns').catch(() => {});
-  }, []);
 
-  const handleCalcReturns = async () => {
-    setMsg('수익률 계산 시작...');
-    await apiClient.post('/api/v1/mlops/calculate-returns').catch(() => {});
-    setTimeout(() => { load(); setMsg('수익률 계산 완료'); }, 8000);
-  };
 
   const handleTrain = async () => {
     setTrainLoading(true);
@@ -152,16 +152,10 @@ const MLOpsDashboard: React.FC = () => {
       {/* 헤더 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
         <h1 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>MLOps 대시보드</h1>
-        <div style={{ fontSize: 10, padding: '2px 7px', borderRadius: 10, background: isLoggedIn ? '#14532d' : '#7f1d1d', color: isLoggedIn ? '#16a34a' : '#dc2626' }}>
-          {isLoggedIn ? '로그인됨' : '미로그인'}
-        </div>
-        {!isLoggedIn && (
-          <button onClick={() => window.location.href = '/auth'} style={{ fontSize: 10, padding: '2px 8px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-            로그인하기
-          </button>
-        )}
+        <button onClick={handleLogout} style={{ fontSize: 10, padding: '2px 8px', background: '#1e1e2e', color: '#9ca3af', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer' }}>
+          로그아웃
+        </button>
         <button onClick={load} style={{ fontSize: 10, padding: '2px 7px', background: '#1e1e2e', color: '#888', border: 'none', borderRadius: 4, cursor: 'pointer' }}>새로고침</button>
-        <button onClick={handleCalcReturns} style={{ fontSize: 10, padding: '2px 7px', background: '#1e1e2e', color: '#9ca3af', border: 'none', borderRadius: 4, cursor: 'pointer' }}>수익률 계산</button>
         <button onClick={handleTrain} disabled={trainLoading} style={{ fontSize: 10, padding: '2px 8px', background: trainLoading ? '#374151' : '#6366f1', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
           {trainLoading ? '학습중...' : '모델 재학습'}
         </button>
@@ -194,8 +188,8 @@ const MLOpsDashboard: React.FC = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: '#555' }}>신호별 성능</div>
               <div style={{ display: 'flex', gap: 3 }}>
-                {[30, 60, 90, 180].map(d => (
-                  <button key={d} onClick={() => setStatsDays(d)} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: statsDays === d ? '#6366f1' : '#1e1e2e', color: statsDays === d ? '#fff' : '#888' }}>{d}일</button>
+                {[{label:'1M',days:30},{label:'3M',days:90},{label:'6M',days:180},{label:'1Y',days:365}].map(({label,days}) => (
+                  <button key={days} onClick={() => setStatsDays(days)} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: statsDays === days ? '#6366f1' : '#1e1e2e', color: statsDays === days ? '#fff' : '#888' }}>{label}</button>
                 ))}
               </div>
             </div>
@@ -299,11 +293,11 @@ const MLOpsDashboard: React.FC = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#555' }}>최근 신호</div>
             <div style={{ display: 'flex', gap: 3 }}>
-              {['', '매수', '매도', '관망'].map(s => (
-                <button key={s} onClick={() => setSignalFilter(s)} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: signalFilter === s ? '#6366f1' : '#1e1e2e', color: signalFilter === s ? '#fff' : '#888' }}>{s || '전체'}</button>
+              {[{label:'전체',val:''},{label:'매수',val:'매수'},{label:'매도',val:'매도'},{label:'관망',val:'관망'}].map(({label,val}) => (
+                <button key={val} onClick={() => setSignalFilter(val)} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: signalFilter === val ? '#6366f1' : '#1e1e2e', color: signalFilter === val ? '#fff' : '#888' }}>{label}</button>
               ))}
-              {[3, 7, 14, 30].map(d => (
-                <button key={d} onClick={() => setRecentDays(d)} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: recentDays === d ? '#374151' : '#1e1e2e', color: recentDays === d ? '#fff' : '#888' }}>{d}일</button>
+              {[{label:'1M',days:30},{label:'3M',days:90},{label:'6M',days:180},{label:'1Y',days:365}].map(({label,days}) => (
+                <button key={days} onClick={() => setRecentDays(days)} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: recentDays === days ? '#374151' : '#1e1e2e', color: recentDays === days ? '#fff' : '#888' }}>{label}</button>
               ))}
             </div>
           </div>
