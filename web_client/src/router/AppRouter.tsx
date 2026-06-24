@@ -4,6 +4,7 @@ import MainPage from '../pages/MainPage';
 import AuthPage from '../pages/AuthPage';
 import ChartPage from '../pages/ChartPage';
 import ExamplePage from '../pages/ExamplePage';
+import MLOpsDashboard from '../pages/MLOpsDashboard';
 
 const AppRouter: React.FC = () => {
   return (
@@ -13,6 +14,7 @@ const AppRouter: React.FC = () => {
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/chart" element={<ChartPage />} />
         <Route path="/example" element={<ExamplePage />} />
+        <Route path="/mlops" element={<MLOpsDashboard />} />
       </Routes>
     </BrowserRouter>
   );
