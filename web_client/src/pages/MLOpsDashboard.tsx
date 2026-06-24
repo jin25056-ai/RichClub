@@ -1,13 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../api/client';
 
 interface ModelStatus {
   model_exists: boolean;
-  model_path: string;
   last_trained_at: string | null;
   last_accuracy: number | null;
-  total_predictions: number;
-  pending_evaluation: number;
+  total_signals: number;
+  returns_calculated: number;
+  pending_returns: number;
+}
+
+interface MonthlyPerf {
+  month: string;
+  signal: string;
+  total: number;
+  correct: number;
+  accuracy: number;
+  avg_ret_5d: number;
+  avg_ret_1d: number;
+}
+
+interface SignalStat {
+  signal: string;
+  total: number;
+  correct: number;
+  accuracy: number;
+  avg_ret_1d: number;
+  avg_ret_5d: number;
+  avg_ret_20d: number;
+}
+
+interface RecentSignal {
+  stock_name: string;
+  stock_code: string;
+  signal: string;
+  predicted_at: string;
+  close: number | null;
+  ret_1d: number | null;
+  ret_5d: number | null;
+  ret_20d: number | null;
+  is_correct_5d: boolean | null;
 }
 
 interface TrainHistory {
@@ -15,220 +47,168 @@ interface TrainHistory {
   triggered_by: string;
   accuracy: number;
   n_train: number;
-  n_test: number;
   elapsed_sec: number;
   stocks_used: number;
-  label_dist: Record<string, number>;
 }
 
-interface PredictionStats {
-  signal: string;
-  total: number;
-  evaluated: number;
-  correct: number;
-  accuracy: number;
-  avg_return_pct: number;
-}
+const SIG_COLOR: Record<string, string> = { '매수': '#16a34a', '매도': '#dc2626', '관망': '#d97706' };
+const SIG_BG: Record<string, string> = { '매수': '#14532d', '매도': '#7f1d1d', '관망': '#78350f' };
 
-interface RecentPrediction {
-  stock_name: string;
-  stock_code: string;
-  signal: string;
-  predicted_at: string;
-  close_at_prediction: number | null;
-  actual_return_pct: number | null;
-  is_correct: boolean | null;
-  evaluated: boolean;
-}
-
-const SIGNAL_COLOR: Record<string, string> = { 매수: '#16a34a', 매도: '#dc2626', 관망: '#d97706' };
-const SIGNAL_BG: Record<string, string> = { 매수: '#14532d', 매도: '#7f1d1d', 관망: '#78350f' };
-
-const fmt = (v: number | null) => v != null ? v.toFixed(2) : '-';
 const fmtDate = (s: string | null) => {
   if (!s) return '-';
-  return new Date(s).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const d = new Date(s);
+  return `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}`;
 };
+
+const fmtRet = (v: number | null) => {
+  if (v == null) return <span style={{ color: '#4b5563' }}>-</span>;
+  return <span style={{ color: v >= 0 ? '#16a34a' : '#dc2626' }}>{v >= 0 ? '+' : ''}{v.toFixed(1)}%</span>;
+};
+
+const card = (children: React.ReactNode, style?: React.CSSProperties) => (
+  <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '12px 14px', ...style }}>
+    {children}
+  </div>
+);
 
 const MLOpsDashboard: React.FC = () => {
   const [status, setStatus] = useState<ModelStatus | null>(null);
+  const [monthly, setMonthly] = useState<MonthlyPerf[]>([]);
+  const [stats, setStats] = useState<SignalStat[]>([]);
+  const [recent, setRecent] = useState<RecentSignal[]>([]);
   const [history, setHistory] = useState<TrainHistory[]>([]);
-  const [stats, setStats] = useState<PredictionStats[]>([]);
-  const [recent, setRecent] = useState<RecentPrediction[]>([]);
-  const [statsDays, setStatsDays] = useState(30);
+  const [statsDays, setStatsDays] = useState(90);
   const [recentDays, setRecentDays] = useState(7);
   const [signalFilter, setSignalFilter] = useState('');
   const [loading, setLoading] = useState(false);
-  const [trainLoading, setTrainLoading] = useState(false);
   const [msg, setMsg] = useState('');
+  const [trainLoading, setTrainLoading] = useState(false);
 
-  const load = async () => {
+  const isLoggedIn = !!localStorage.getItem('access_token');
+
+  const load = useCallback(async () => {
+    if (!isLoggedIn) return;
     setLoading(true);
     try {
-      const [s, h, st, r] = await Promise.all([
+      const [s, m, st, r, h] = await Promise.all([
         apiClient.get<ModelStatus>('/api/v1/mlops/status'),
+        apiClient.get<MonthlyPerf[]>('/api/v1/mlops/monthly-performance'),
+        apiClient.get<SignalStat[]>(`/api/v1/mlops/signal-stats?days=${statsDays}`),
+        apiClient.get<RecentSignal[]>(`/api/v1/mlops/recent-signals?days=${recentDays}${signalFilter ? `&signal=${signalFilter}` : ''}`),
         apiClient.get<TrainHistory[]>('/api/v1/mlops/train-history'),
-        apiClient.get<PredictionStats[]>(`/api/v1/mlops/prediction-stats?days=${statsDays}`),
-        apiClient.get<RecentPrediction[]>(`/api/v1/mlops/recent-predictions?days=${recentDays}${signalFilter ? `&signal=${signalFilter}` : ''}`),
       ]);
       setStatus(s.data);
-      setHistory(h.data);
+      setMonthly(m.data);
       setStats(st.data);
       setRecent(r.data);
+      setHistory(h.data);
     } catch (e) {
-      setMsg('데이터 로드 실패');
+      setMsg('데이터 로드 실패 - 로그인 확인');
     }
     setLoading(false);
-  };
+  }, [statsDays, recentDays, signalFilter, isLoggedIn]);
 
-  const runEvaluate = async (silent = false) => {
-    try {
-      await apiClient.post('/api/v1/mlops/evaluate');
-      if (!silent) setMsg('평가 시작됨 - 잠시 후 새로고침됩니다');
-      // 백그라운드 처리 대기 후 새로고침
-      setTimeout(async () => {
-        const [s, st, r] = await Promise.all([
-          apiClient.get<ModelStatus>('/api/v1/mlops/status'),
-          apiClient.get<PredictionStats[]>(`/api/v1/mlops/prediction-stats?days=${statsDays}`),
-          apiClient.get<RecentPrediction[]>(`/api/v1/mlops/recent-predictions?days=${recentDays}${signalFilter ? `&signal=${signalFilter}` : ''}`),
-        ]);
-        setStatus(s.data);
-        setStats(st.data);
-        setRecent(r.data);
-        if (!silent) setMsg('평가 완료');
-      }, 10000);
-    } catch (e) {
-      if (!silent) setMsg('평가 실패 - 로그인 확인');
-    }
-  };
+  useEffect(() => { load(); }, [load]);
 
-  useEffect(() => { load(); }, [statsDays, recentDays, signalFilter]);
-
-  // 페이지 로드 시 자동 평가 실행
+  // 페이지 로드 시 자동으로 수익률 계산 트리거
   useEffect(() => {
-    if (localStorage.getItem('access_token')) {
-      runEvaluate(true);
-    }
+    if (!isLoggedIn) return;
+    apiClient.post('/api/v1/mlops/calculate-returns').catch(() => {});
   }, []);
+
+  const handleCalcReturns = async () => {
+    setMsg('수익률 계산 시작...');
+    await apiClient.post('/api/v1/mlops/calculate-returns').catch(() => {});
+    setTimeout(() => { load(); setMsg('수익률 계산 완료'); }, 8000);
+  };
 
   const handleTrain = async () => {
     setTrainLoading(true);
-    setMsg('');
+    setMsg('학습 중... (수분 소요)');
     try {
       const res = await apiClient.post('/api/v1/mlops/train');
-      setMsg(`학습 완료: 정확도 ${(res.data.accuracy * 100).toFixed(1)}%, ${res.data.n_samples}건, ${res.data.elapsed_sec}초`);
+      setMsg(`학습 완료: 정확도 ${(res.data.accuracy * 100).toFixed(1)}%`);
       load();
-    } catch (e) {
-      setMsg('학습 실패');
-    }
+    } catch { setMsg('학습 실패'); }
     setTrainLoading(false);
   };
 
-  const handleEvaluate = () => runEvaluate();
-
-  const card = (children: React.ReactNode, style?: React.CSSProperties) => (
-    <div style={{
-      background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8,
-      padding: '14px 16px', ...style
-    }}>{children}</div>
-  );
-
-  const label = (text: string) => (
-    <div style={{ fontSize: 11, fontWeight: 600, color: '#555', marginBottom: 8 }}>{text}</div>
-  );
+  // 월별 데이터를 월 단위로 묶어서 매수/매도/관망 함께 표시
+  const monthlyGrouped = monthly.reduce((acc, m) => {
+    if (!acc[m.month]) acc[m.month] = {};
+    acc[m.month][m.signal] = m;
+    return acc;
+  }, {} as Record<string, Record<string, MonthlyPerf>>);
+  const monthKeys = Object.keys(monthlyGrouped).sort().reverse().slice(0, 12);
 
   return (
-    <div style={{
-      background: '#0a0a14', minHeight: '100vh', padding: '16px 20px',
-      fontFamily: 'inherit', color: '#e2e8f0', boxSizing: 'border-box',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <h1 style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', margin: 0 }}>MLOps 대시보드</h1>
-        <div style={{
-          fontSize: 10, padding: '2px 8px', borderRadius: 12,
-          background: localStorage.getItem('access_token') ? '#14532d' : '#7f1d1d',
-          color: localStorage.getItem('access_token') ? '#16a34a' : '#dc2626',
-        }}>
-          {localStorage.getItem('access_token') ? '로그인됨' : '미로그인'}
+    <div style={{ background: '#0a0a14', minHeight: '100vh', padding: '14px 18px', color: '#e2e8f0', fontFamily: 'inherit', boxSizing: 'border-box' }}>
+      {/* 헤더 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <h1 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>MLOps 대시보드</h1>
+        <div style={{ fontSize: 10, padding: '2px 7px', borderRadius: 10, background: isLoggedIn ? '#14532d' : '#7f1d1d', color: isLoggedIn ? '#16a34a' : '#dc2626' }}>
+          {isLoggedIn ? '로그인됨' : '미로그인'}
         </div>
-        {!localStorage.getItem('access_token') && (
-          <button onClick={() => window.location.href = '/auth'}
-            style={{ fontSize: 10, padding: '2px 8px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+        {!isLoggedIn && (
+          <button onClick={() => window.location.href = '/auth'} style={{ fontSize: 10, padding: '2px 8px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
             로그인하기
           </button>
         )}
-        <button onClick={load} style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#888', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-          새로고침
+        <button onClick={load} style={{ fontSize: 10, padding: '2px 7px', background: '#1e1e2e', color: '#888', border: 'none', borderRadius: 4, cursor: 'pointer' }}>새로고침</button>
+        <button onClick={handleCalcReturns} style={{ fontSize: 10, padding: '2px 7px', background: '#1e1e2e', color: '#9ca3af', border: 'none', borderRadius: 4, cursor: 'pointer' }}>수익률 계산</button>
+        <button onClick={handleTrain} disabled={trainLoading} style={{ fontSize: 10, padding: '2px 8px', background: trainLoading ? '#374151' : '#6366f1', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+          {trainLoading ? '학습중...' : '모델 재학습'}
         </button>
-        <button onClick={handleTrain} disabled={trainLoading}
-          style={{ fontSize: 10, padding: '3px 10px', background: trainLoading ? '#374151' : '#6366f1', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-          {trainLoading ? '학습 중...' : '수동 재학습'}
-        </button>
-        <button onClick={handleEvaluate}
-          style={{ fontSize: 10, padding: '3px 10px', background: '#1e1e2e', color: '#9ca3af', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-          성능 평가 실행
-        </button>
-        {msg && <span style={{ fontSize: 11, color: '#6366f1' }}>{msg}</span>}
+        {msg && <span style={{ fontSize: 10, color: '#6366f1' }}>{msg}</span>}
+        {loading && <span style={{ fontSize: 10, color: '#555' }}>로딩중...</span>}
       </div>
 
-      {loading && <div style={{ fontSize: 11, color: '#555', marginBottom: 12 }}>불러오는 중...</div>}
-
-      {/* 모델 현황 */}
+      {/* 모델 현황 카드 */}
       {status && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 14 }}>
           {[
-            { label: '모델 상태', value: status.model_exists ? '정상' : '없음', color: status.model_exists ? '#16a34a' : '#dc2626' },
+            { label: '모델', value: status.model_exists ? '정상' : '없음', color: status.model_exists ? '#16a34a' : '#dc2626' },
             { label: '마지막 정확도', value: status.last_accuracy != null ? `${(status.last_accuracy * 100).toFixed(1)}%` : '-', color: '#6366f1' },
-            { label: '누적 예측', value: `${status.total_predictions.toLocaleString()}건`, color: '#e2e8f0' },
-            { label: '평가 대기', value: `${status.pending_evaluation.toLocaleString()}건`, color: status.pending_evaluation > 100 ? '#d97706' : '#6b7280' },
-          ].map((item, idx) => (
-            <div key={idx} style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '14px 16px' }}>
-              <div style={{ fontSize: 9, color: '#555', marginBottom: 4 }}>{item.label}</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: item.color }}>{item.value}</div>
-              {item.label === '모델 상태' && status.last_trained_at && (
-                <div style={{ fontSize: 9, color: '#4b5563', marginTop: 3 }}>
-                  마지막 학습: {fmtDate(status.last_trained_at)}
-                </div>
-              )}
+            { label: '전체 신호', value: status.total_signals.toLocaleString(), color: '#e2e8f0' },
+            { label: '수익률 계산됨', value: status.returns_calculated.toLocaleString(), color: '#16a34a' },
+            { label: '계산 대기', value: status.pending_returns.toLocaleString(), color: status.pending_returns > 0 ? '#d97706' : '#4b5563' },
+          ].map((item, i) => (
+            <div key={i} style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px' }}>
+              <div style={{ fontSize: 9, color: '#555', marginBottom: 3 }}>{item.label}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: item.color }}>{item.value}</div>
             </div>
           ))}
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-        {/* 신호별 정확도 */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+        {/* 기간별 신호 성능 */}
         {card(
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              {label('신호별 예측 성능')}
-              <div style={{ display: 'flex', gap: 4 }}>
-                {[7, 14, 30, 90].map((d) => (
-                  <button key={d} onClick={() => setStatsDays(d)}
-                    style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: statsDays === d ? '#6366f1' : '#1e1e2e', color: statsDays === d ? '#fff' : '#888' }}>
-                    {d}일
-                  </button>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#555' }}>신호별 성능</div>
+              <div style={{ display: 'flex', gap: 3 }}>
+                {[30, 60, 90, 180].map(d => (
+                  <button key={d} onClick={() => setStatsDays(d)} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: statsDays === d ? '#6366f1' : '#1e1e2e', color: statsDays === d ? '#fff' : '#888' }}>{d}일</button>
                 ))}
               </div>
             </div>
             {stats.length === 0 ? (
-              <div style={{ fontSize: 11, color: '#555' }}>평가된 예측 없음</div>
-            ) : stats.map((s) => (
+              <div style={{ fontSize: 11, color: '#555' }}>수익률 데이터 없음 (수익률 계산 버튼 클릭)</div>
+            ) : stats.map(s => (
               <div key={s.signal} style={{ marginBottom: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 3,
-                    background: SIGNAL_BG[s.signal], color: SIGNAL_COLOR[s.signal],
-                  }}>{s.signal}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: s.accuracy >= 60 ? '#16a34a' : s.accuracy >= 50 ? '#d97706' : '#dc2626' }}>
-                    {s.accuracy.toFixed(1)}%
-                  </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 3, background: SIG_BG[s.signal], color: SIG_COLOR[s.signal] }}>{s.signal}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: s.accuracy >= 60 ? '#16a34a' : s.accuracy >= 50 ? '#d97706' : '#dc2626' }}>{s.accuracy.toFixed(1)}%</span>
                 </div>
-                <div style={{ height: 4, background: '#1e1e2e', borderRadius: 2 }}>
-                  <div style={{ height: 4, width: `${s.accuracy}%`, background: SIGNAL_COLOR[s.signal], borderRadius: 2 }} />
+                <div style={{ height: 4, background: '#1e1e2e', borderRadius: 2, marginBottom: 3 }}>
+                  <div style={{ height: 4, width: `${s.accuracy}%`, background: SIG_COLOR[s.signal], borderRadius: 2 }} />
                 </div>
-                <div style={{ display: 'flex', gap: 10, marginTop: 3, fontSize: 9, color: '#555' }}>
-                  <span>{s.correct}승 {s.total - s.correct}패 ({s.total}건)</span>
-                  <span>평균 수익 {s.avg_return_pct >= 0 ? '+' : ''}{s.avg_return_pct.toFixed(2)}%</span>
+                <div style={{ fontSize: 9, color: '#555', display: 'flex', gap: 8 }}>
+                  <span>{s.correct}/{s.total}건</span>
+                  <span>1일: {s.avg_ret_1d >= 0 ? '+' : ''}{s.avg_ret_1d.toFixed(1)}%</span>
+                  <span>5일: {s.avg_ret_5d >= 0 ? '+' : ''}{s.avg_ret_5d.toFixed(1)}%</span>
+                  <span>20일: {s.avg_ret_20d >= 0 ? '+' : ''}{s.avg_ret_20d.toFixed(1)}%</span>
                 </div>
               </div>
             ))}
@@ -238,89 +218,119 @@ const MLOpsDashboard: React.FC = () => {
         {/* 학습 이력 */}
         {card(
           <>
-            {label('학습 이력')}
-            <div style={{ overflowY: 'auto', maxHeight: 200 }}>
-              {history.length === 0 ? (
-                <div style={{ fontSize: 11, color: '#555' }}>학습 이력 없음</div>
-              ) : history.map((h, i) => (
-                <div key={i} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '5px 0', borderBottom: '1px solid #13131e', fontSize: 10,
-                }}>
-                  <div>
-                    <span style={{ color: '#9ca3af' }}>{fmtDate(h.trained_at)}</span>
-                    <span style={{ color: '#4b5563', marginLeft: 8 }}>{h.triggered_by}</span>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <span style={{ color: '#6366f1', fontWeight: 600 }}>{(h.accuracy * 100).toFixed(1)}%</span>
-                    <span style={{ color: '#4b5563', marginLeft: 6 }}>{h.stocks_used}종목</span>
-                  </div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#555', marginBottom: 8 }}>학습 이력</div>
+            {history.length === 0 ? (
+              <div style={{ fontSize: 11, color: '#555' }}>없음</div>
+            ) : history.map((h, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #13131e', fontSize: 10 }}>
+                <div>
+                  <span style={{ color: '#9ca3af' }}>{h.trained_at ? new Date(h.trained_at).toLocaleDateString('ko-KR') : '-'}</span>
+                  <span style={{ color: '#4b5563', marginLeft: 6 }}>{h.triggered_by}</span>
                 </div>
-              ))}
-            </div>
+                <div>
+                  <span style={{ color: '#6366f1', fontWeight: 600 }}>{(h.accuracy * 100).toFixed(1)}%</span>
+                  <span style={{ color: '#4b5563', marginLeft: 5 }}>{h.stocks_used}종목</span>
+                </div>
+              </div>
+            ))}
           </>
         )}
       </div>
 
-      {/* 최근 예측 목록 */}
+      {/* 월별 성능 */}
       {card(
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            {label('최근 예측 목록')}
-            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              {['', '매수', '매도', '관망'].map((s) => (
-                <button key={s} onClick={() => setSignalFilter(s)}
-                  style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: signalFilter === s ? '#6366f1' : '#1e1e2e', color: signalFilter === s ? '#fff' : '#888' }}>
-                  {s || '전체'}
-                </button>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#555', marginBottom: 8 }}>월별 성능 ({monthKeys.length}개월)</div>
+          {monthKeys.length === 0 ? (
+            <div style={{ fontSize: 11, color: '#555' }}>월별 집계 없음 (수익률 계산 후 자동 생성)</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+                <thead>
+                  <tr style={{ color: '#555', borderBottom: '1px solid #1e1e2e' }}>
+                    <th style={{ textAlign: 'left', padding: '3px 6px' }}>월</th>
+                    {['매수', '매도', '관망'].map(s => (
+                      <React.Fragment key={s}>
+                        <th style={{ textAlign: 'center', padding: '3px 6px', color: SIG_COLOR[s] }}>{s} 승률</th>
+                        <th style={{ textAlign: 'center', padding: '3px 6px', color: SIG_COLOR[s] }}>{s} 5일평균</th>
+                      </React.Fragment>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthKeys.map(month => {
+                    const g = monthlyGrouped[month];
+                    return (
+                      <tr key={month} style={{ borderBottom: '1px solid #13131e' }}>
+                        <td style={{ padding: '4px 6px', color: '#9ca3af' }}>{month}</td>
+                        {['매수', '매도', '관망'].map(s => {
+                          const d = g[s];
+                          return (
+                            <React.Fragment key={s}>
+                              <td style={{ textAlign: 'center', padding: '4px 6px', color: d ? (d.accuracy >= 60 ? '#16a34a' : d.accuracy >= 50 ? '#d97706' : '#dc2626') : '#4b5563' }}>
+                                {d ? `${d.accuracy.toFixed(0)}% (${d.correct}/${d.total})` : '-'}
+                              </td>
+                              <td style={{ textAlign: 'center', padding: '4px 6px' }}>
+                                {d ? fmtRet(d.avg_ret_5d) : <span style={{ color: '#4b5563' }}>-</span>}
+                              </td>
+                            </React.Fragment>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>,
+        { marginBottom: 12 }
+      )}
+
+      {/* 최근 신호 목록 */}
+      {card(
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#555' }}>최근 신호</div>
+            <div style={{ display: 'flex', gap: 3 }}>
+              {['', '매수', '매도', '관망'].map(s => (
+                <button key={s} onClick={() => setSignalFilter(s)} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: signalFilter === s ? '#6366f1' : '#1e1e2e', color: signalFilter === s ? '#fff' : '#888' }}>{s || '전체'}</button>
               ))}
-              {[3, 7, 14].map((d) => (
-                <button key={d} onClick={() => setRecentDays(d)}
-                  style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: recentDays === d ? '#374151' : '#1e1e2e', color: recentDays === d ? '#fff' : '#888' }}>
-                  {d}일
-                </button>
+              {[3, 7, 14, 30].map(d => (
+                <button key={d} onClick={() => setRecentDays(d)} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: recentDays === d ? '#374151' : '#1e1e2e', color: recentDays === d ? '#fff' : '#888' }}>{d}일</button>
               ))}
             </div>
           </div>
-          <div style={{ overflowY: 'auto', maxHeight: 300 }}>
+          <div style={{ overflowY: 'auto', maxHeight: 280 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
               <thead>
                 <tr style={{ color: '#555', borderBottom: '1px solid #1e1e2e' }}>
-                  {['종목', '코드', '신호', '예측일', '예측 종가', '실제 수익', '결과'].map((h) => (
-                    <th key={h} style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 500 }}>{h}</th>
+                  {['종목', '신호', '예측일', '종가', '1일', '5일', '20일', '적중'].map(h => (
+                    <th key={h} style={{ textAlign: 'left', padding: '3px 5px', fontWeight: 500 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {recent.map((r, i) => (
                   <tr key={i} style={{ borderBottom: '1px solid #13131e' }}>
-                    <td style={{ padding: '4px 6px', color: '#d1d5db' }}>{r.stock_name}</td>
-                    <td style={{ padding: '4px 6px', color: '#4b5563' }}>{r.stock_code}</td>
-                    <td style={{ padding: '4px 6px' }}>
-                      <span style={{ background: SIGNAL_BG[r.signal], color: SIGNAL_COLOR[r.signal], padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>
-                        {r.signal}
-                      </span>
+                    <td style={{ padding: '3px 5px', color: '#d1d5db' }}>{r.stock_name}</td>
+                    <td style={{ padding: '3px 5px' }}>
+                      <span style={{ background: SIG_BG[r.signal], color: SIG_COLOR[r.signal], padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>{r.signal}</span>
                     </td>
-                    <td style={{ padding: '4px 6px', color: '#6b7280' }}>{fmtDate(r.predicted_at)}</td>
-                    <td style={{ padding: '4px 6px', color: '#9ca3af' }}>
-                      {r.close_at_prediction != null ? r.close_at_prediction.toLocaleString() : '-'}
-                    </td>
-                    <td style={{ padding: '4px 6px', color: r.actual_return_pct != null ? (r.actual_return_pct >= 0 ? '#16a34a' : '#dc2626') : '#4b5563' }}>
-                      {r.actual_return_pct != null ? `${r.actual_return_pct >= 0 ? '+' : ''}${r.actual_return_pct.toFixed(2)}%` : '-'}
-                    </td>
-                    <td style={{ padding: '4px 6px' }}>
-                      {!r.evaluated ? (
-                        <span style={{ color: '#4b5563' }}>대기</span>
-                      ) : r.is_correct ? (
-                        <span style={{ color: '#16a34a' }}>적중</span>
-                      ) : (
-                        <span style={{ color: '#dc2626' }}>미적중</span>
-                      )}
+                    <td style={{ padding: '3px 5px', color: '#6b7280' }}>{fmtDate(r.predicted_at)}</td>
+                    <td style={{ padding: '3px 5px', color: '#9ca3af' }}>{r.close?.toLocaleString() ?? '-'}</td>
+                    <td style={{ padding: '3px 5px' }}>{fmtRet(r.ret_1d)}</td>
+                    <td style={{ padding: '3px 5px' }}>{fmtRet(r.ret_5d)}</td>
+                    <td style={{ padding: '3px 5px' }}>{fmtRet(r.ret_20d)}</td>
+                    <td style={{ padding: '3px 5px' }}>
+                      {r.is_correct_5d == null ? <span style={{ color: '#4b5563' }}>대기</span>
+                        : r.is_correct_5d ? <span style={{ color: '#16a34a' }}>O</span>
+                          : <span style={{ color: '#dc2626' }}>X</span>}
                     </td>
                   </tr>
                 ))}
                 {recent.length === 0 && (
-                  <tr><td colSpan={7} style={{ padding: 12, color: '#555', textAlign: 'center' }}>데이터 없음</td></tr>
+                  <tr><td colSpan={8} style={{ padding: 10, color: '#555', textAlign: 'center' }}>데이터 없음</td></tr>
                 )}
               </tbody>
             </table>

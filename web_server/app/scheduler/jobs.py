@@ -27,21 +27,18 @@ async def run_daily_predict() -> None:
 
 
 async def run_evaluate() -> None:
-    """매일 예측 성능 평가 (evaluate_at 지난 것들 처리, UTC 08:00)"""
+    """매일 수익률 계산 + 월별 집계 (UTC 08:00)"""
     db = get_db()
-    from app.ml.predictor import evaluate_predictions
-    await evaluate_predictions(db)
+    from app.ml.predictor import calculate_returns, aggregate_monthly_performance
+    await calculate_returns(db)
+    await aggregate_monthly_performance(db)
 
 
 async def run_retrain() -> None:
-    """매주 월요일 모델 재학습 (UTC 23:00 = KST 화 08:00)"""
+    """매주 일요일 성능 체크 후 필요시 재학습 (UTC 23:00)"""
     db = get_db()
-    from app.ml.trainer import train_model
-    try:
-        result = await train_model(db, triggered_by="weekly_schedule")
-        logger.info(f"모델 재학습 완료: {result}")
-    except Exception as e:
-        logger.error(f"모델 재학습 실패: {e}")
+    from app.ml.predictor import check_and_retrain
+    await check_and_retrain(db)
 
 
 async def run_auto_retrain_if_needed() -> None:
