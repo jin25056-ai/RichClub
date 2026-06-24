@@ -146,6 +146,16 @@ async def get_ai_predictions(
     cursor = db.total_trading_signals.find(query).sort("predicted_at", -1).limit(limit)
     docs = [doc async for doc in cursor]
 
+    # 종목별 최신 1건만 (중복 제거)
+    seen: set = set()
+    deduped = []
+    for doc in docs:
+        sname = doc.get("stock_name", "")
+        if sname not in seen:
+            seen.add(sname)
+            deduped.append(doc)
+    docs = deduped
+
     # 종목별 직전 close를 aggregate 한 방에 조회
     stock_names = list({doc.get("stock_name") for doc in docs if doc.get("stock_name")})
     prev_close_map: dict = {}

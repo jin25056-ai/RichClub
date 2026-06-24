@@ -71,7 +71,7 @@ const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) 
           {items.map((item) => {
             const isActive = selectedCode === item.stock_code;
             return (
-              <div key={item.stock_code + item.predicted_at}
+              <div key={item.stock_code}
                 onClick={() => onSelectStock(item.stock_code, item.stock_name)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -89,7 +89,7 @@ const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) 
                   {item.signal}
                 </span>
 
-                {/* 종목명 + 날짜 */}
+                {/* 종목명 + 코드 + 날짜 */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
                     fontSize: 11, color: isActive ? '#a5b4fc' : '#d1d5db',
@@ -99,7 +99,7 @@ const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) 
                     {item.stock_name}
                   </div>
                   <div style={{ fontSize: 9, color: '#4b5563' }}>
-                    {fmtDate(item.predicted_at)}
+                    {item.stock_code} · {fmtDate(item.predicted_at)}
                   </div>
                 </div>
 
