@@ -100,6 +100,11 @@ export const stockApi = {
       params: { signal, limit, stock_name },
     }),
 
+  getTodayPredictions: (signal?: string) =>
+    apiClient.get<AIPredictionItem[]>('/api/v1/stock/ai/today', {
+      params: { signal },
+    }),
+
   getAIDetail: (stock_code: string) =>
     apiClient.get<AIDetailResponse>(`/api/v1/stock/ai/detail/${stock_code}`),
 
