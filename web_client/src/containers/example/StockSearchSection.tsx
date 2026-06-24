@@ -245,6 +245,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
   const chartWrapRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startRange: [number, number] } | null>(null);
   const isDragging = useRef(false);
+  const skipSearch = useRef(false);
 
   useEffect(() => {
     const onResize = () => setHeights(getChartHeights());
@@ -377,6 +378,15 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     stockApi.search(query).then((res) => { setResults(res.data); setShowDropdown(true); });
   };
 
+  useEffect(() => {
+    if (skipSearch.current) { skipSearch.current = false; return; }
+    if (!query.trim()) { setResults([]); setShowDropdown(false); return; }
+    const timer = setTimeout(() => {
+      stockApi.search(query).then((res) => { setResults(res.data); setShowDropdown(true); });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   const fetchAll = (code: string, name: string, p: Period) => {
     if (searchOnly) return;
     setLoading(true);
@@ -475,6 +485,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
   };
 
   const handleSelect = (item: StockItem) => {
+    skipSearch.current = true;
     setSelected(item); setResults([]); setShowDropdown(false);
     setQuery(item.stock_name);
     onStockChange?.(item.stock_code, item.stock_name);
