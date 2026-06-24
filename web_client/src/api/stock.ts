@@ -56,16 +56,35 @@ export interface GlobalMarketResponse {
   invest_reason: string;
 }
 
+export interface TradeRecord {
+  buy_date: string;
+  buy_price: number;
+  sell_date: string | null;
+  sell_price: number | null;
+  return_pct: number | null;
+  unrealized_pct: number | null;
+}
+
 export interface WinRateResult {
-  signal: string; total_signals: number;
-  win_count: number; lose_count: number; win_rate: number;
-  avg_return_pct: number; max_return_pct: number; max_loss_pct: number;
-  cumulative_return_pct?: number;
+  signal: string;
+  total_signals: number;
+  win_count: number;
+  lose_count: number;
+  win_rate: number;
+  avg_return_pct: number;
+  max_return_pct: number;
+  max_loss_pct: number;
+  cumulative_return_pct: number;
+  unrealized_pct: number | null;
   hold_days: number;
 }
 export interface WinRateResponse {
-  stock_code: string | null; stock_name: string | null;
-  period: string; results: WinRateResult[]; updated_at: string;
+  stock_code: string | null;
+  stock_name: string | null;
+  period: string;
+  results: WinRateResult[];
+  trades: TradeRecord[];
+  updated_at: string;
 }
 
 export interface StockItem { stock_code: string; stock_name: string; }

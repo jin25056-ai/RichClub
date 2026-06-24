@@ -39,6 +39,15 @@ class GlobalMarketResponse(BaseModel):
     invest_reason: str
 
 
+class TradeRecord(BaseModel):
+    buy_date: str
+    buy_price: float
+    sell_date: Optional[str] = None
+    sell_price: Optional[float] = None
+    return_pct: Optional[float] = None  # 청산된 경우
+    unrealized_pct: Optional[float] = None  # 미청산인 경우
+
+
 class WinRateResult(BaseModel):
     signal: str
     total_signals: int
@@ -48,7 +57,8 @@ class WinRateResult(BaseModel):
     avg_return_pct: float
     max_return_pct: float
     max_loss_pct: float
-    cumulative_return_pct: float  # 기간 전체 누적 수익률
+    cumulative_return_pct: float
+    unrealized_pct: Optional[float] = None   # 현재 보유 중인 미실현 손익
     hold_days: int
 
 
@@ -57,6 +67,7 @@ class WinRateResponse(BaseModel):
     stock_name: Optional[str]
     period: str
     results: List[WinRateResult]
+    trades: List[TradeRecord]   # 실제 거래 내역
     updated_at: datetime
 
 
@@ -237,61 +248,105 @@ async def get_win_rate(
 
     stock_name = docs[0].get("stock_name") if docs else None
 
-    # 종목별 날짜-가격 맵
-    price_map: dict = defaultdict(list)
+    # 종목별로 그룹핑 후 포지션 추적
+    # 매수 신호 → 매수, 매도 신호 → 청산, 관망 → 아무것도 안 함
+    sc_docs: dict = defaultdict(list)
     for doc in docs:
         sc = doc.get("stock_code", "")
-        dt = doc.get("predicted_at")
-        close = doc.get("close")
-        if sc and dt and close:
-            price_map[sc].append((_to_date(dt), float(close)))
+        if sc:
+            sc_docs[sc].append(doc)
 
-    signal_returns: dict = {"매수": [], "매도": [], "관망": []}
+    trades: list = []
+    realized_returns: list = []
+    unrealized_positions: list = []  # 아직 청산 안 된 포지션
 
-    for doc in docs:
-        sc = doc.get("stock_code", "")
-        signal = doc.get("signal", "관망")
-        dt = doc.get("predicted_at")
-        close = doc.get("close")
+    today_price_map: dict = {}  # 종목별 최신 가격
 
-        if not (sc and dt and close and signal in signal_returns):
-            continue
+    for sc, sdocs in sc_docs.items():
+        position = None  # 현재 보유 포지션: {"buy_date", "buy_price"}
+        latest_price = None
 
-        dt_normalized = _to_date(dt)
+        for doc in sdocs:
+            signal = doc.get("signal", "관망")
+            dt = _to_date(doc.get("predicted_at"))
+            close = doc.get("close")
+            if close is None:
+                continue
+            close = float(close)
+            latest_price = close
+            date_str = dt.strftime("%Y-%m-%d")
 
-        future_prices = [
-            p_close for p_dt, p_close in price_map[sc]
-            if timedelta(days=hold_days - 1) <= (p_dt - dt_normalized) <= timedelta(days=hold_days + 2)
-        ]
+            if signal == "매수" and position is None:
+                # 매수 신호: 포지션 진입
+                position = {"buy_date": date_str, "buy_price": close}
 
-        if future_prices:
-            ret_pct = (future_prices[0] - float(close)) / float(close) * 100
-            if -50 <= ret_pct <= 100:
-                signal_returns[signal].append(round(ret_pct, 2))
+            elif signal == "매도" and position is not None:
+                # 매도 신호: 포지션 청산
+                ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
+                trades.append(TradeRecord(
+                    buy_date=position["buy_date"],
+                    buy_price=position["buy_price"],
+                    sell_date=date_str,
+                    sell_price=close,
+                    return_pct=ret_pct,
+                ))
+                realized_returns.append(ret_pct)
+                position = None
 
+            # 관망은 아무것도 안 함
+
+        # 기간 끝났는데 포지션 남아있으면 미실현 손익
+        if position is not None and latest_price is not None:
+            unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
+            unrealized_positions.append(unrealized_pct)
+            trades.append(TradeRecord(
+                buy_date=position["buy_date"],
+                buy_price=position["buy_price"],
+                sell_date=None,
+                sell_price=latest_price,
+                unrealized_pct=unrealized_pct,
+            ))
+
+    # 결과 집계 (매수 신호 기준으로만)
     results = []
-    for signal, returns in signal_returns.items():
-        if not returns:
-            continue
-        win = [r for r in returns if r > 0]
-        lose = [r for r in returns if r <= 0]
+    if realized_returns:
+        win = [r for r in realized_returns if r > 0]
+        lose = [r for r in realized_returns if r <= 0]
 
-        # 누적 수익률: 복리 계산 (1 * (1+r1/100) * (1+r2/100) * ...)
         cumulative = 1.0
-        for r in returns:
+        for r in realized_returns:
             cumulative *= (1 + r / 100)
         cumulative_pct = round((cumulative - 1) * 100, 2)
 
+        avg_unrealized = round(sum(unrealized_positions) / len(unrealized_positions), 2) if unrealized_positions else None
+
         results.append(WinRateResult(
-            signal=signal,
-            total_signals=len(returns),
+            signal="매수→매도",
+            total_signals=len(realized_returns),
             win_count=len(win),
             lose_count=len(lose),
-            win_rate=round(len(win) / len(returns) * 100, 1),
-            avg_return_pct=round(sum(returns) / len(returns), 2),
-            max_return_pct=round(max(returns), 2),
-            max_loss_pct=round(min(returns), 2),
+            win_rate=round(len(win) / len(realized_returns) * 100, 1) if realized_returns else 0,
+            avg_return_pct=round(sum(realized_returns) / len(realized_returns), 2),
+            max_return_pct=round(max(realized_returns), 2),
+            max_loss_pct=round(min(realized_returns), 2),
             cumulative_return_pct=cumulative_pct,
+            unrealized_pct=avg_unrealized,
+            hold_days=hold_days,
+        ))
+    elif unrealized_positions:
+        # 청산된 거래는 없고 미실현만 있는 경우
+        avg_unrealized = round(sum(unrealized_positions) / len(unrealized_positions), 2)
+        results.append(WinRateResult(
+            signal="매수→보유중",
+            total_signals=0,
+            win_count=0,
+            lose_count=0,
+            win_rate=0,
+            avg_return_pct=0,
+            max_return_pct=0,
+            max_loss_pct=0,
+            cumulative_return_pct=0,
+            unrealized_pct=avg_unrealized,
             hold_days=hold_days,
         ))
 
@@ -300,5 +355,6 @@ async def get_win_rate(
         stock_name=stock_name,
         period=period,
         results=results,
+        trades=trades,
         updated_at=datetime.now(timezone.utc),
     )
