@@ -301,33 +301,15 @@ async def get_macd(
 @router.get("/chart/candle/{stock_code}", response_model=CandleResponse, summary="캔들 차트 데이터")
 async def get_candles(
     stock_code: str,
-    days: int = Query(30, ge=1, le=240),
+    days: int = Query(90, ge=1, le=730),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
     since = datetime.utcnow() - timedelta(days=days)
 
-    # 1) 5분봉 먼저 시도
-    cursor = db.candles_5m.find(
-        {"stock_code": stock_code, "datetime": {"$gte": since}},
-        {"_id": 0, "datetime": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
-    ).sort("datetime", 1)
-    docs = [doc async for doc in cursor]
-    if docs:
-        data = []
-        for d in docs:
-            dt = d["datetime"]
-            dt_str = dt.strftime("%Y-%m-%d %H:%M") if hasattr(dt, "strftime") else str(dt)
-            data.append(CandleDataPoint(
-                datetime=dt_str,
-                open=d.get("open"), high=d.get("high"),
-                low=d.get("low"), close=d.get("close"), volume=d.get("volume"),
-            ))
-        return CandleResponse(stock_code=stock_code, interval="5m", data=data)
-
-    # 2) DB 일봉 - stock_code 또는 stock_name 둘 다 시도
+    # 1) DB 일봉 - stock_code 또는 stock_name 둘 다 시도 (날짜 필터 없이 전체)
     cursor = db.total_trading_signals.find(
-        {"$or": [{"stock_code": stock_code}, {"stock_name": stock_code}], "predicted_at": {"$gte": since}},
+        {"$or": [{"stock_code": stock_code}, {"stock_name": stock_code}]},
         {"_id": 0, "predicted_at": 1, "open": 1, "high": 1, "low": 1, "close": 1,
          "volume": 1, "ma5": 1, "ma20": 1, "ma60": 1}
     ).sort("predicted_at", 1)
