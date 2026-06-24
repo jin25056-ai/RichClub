@@ -168,7 +168,80 @@ async def get_train_history(
     return result
 
 
-@router.post("/calculate-returns")
+@router.get("/stock-performance")
+async def get_stock_performance(
+    days: int = 90,
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """종목별 매수→매도 실현 수익률 집계"""
+    from collections import defaultdict
+    since = datetime.utcnow() - timedelta(days=days) if days < 9999 else None
+
+    match = {'signal': {'$in': ['매수', '매도']}}
+    if since:
+        match['predicted_at'] = {'$gte': since}
+
+    cursor = db.total_trading_signals.find(match).sort('predicted_at', 1)
+    docs = [doc async for doc in cursor]
+
+    sc_docs = defaultdict(list)
+    for doc in docs:
+        code = doc.get('stock_code', '')
+        if code:
+            sc_docs[code].append(doc)
+
+    result = []
+    for code, sdocs in sc_docs.items():
+        name = sdocs[0].get('stock_name', '')
+        position = None
+        realized = []
+        unrealized_pct = None
+
+        for doc in sdocs:
+            signal = doc.get('signal')
+            close = doc.get('close')
+            predicted_at = doc.get('predicted_at')
+            if close is None:
+                continue
+            close = float(close)
+            date_str = predicted_at.strftime('%Y-%m-%d') if hasattr(predicted_at, 'strftime') else str(predicted_at)[:10]
+
+            if signal == '매수' and position is None:
+                position = {'buy_date': date_str, 'buy_price': close}
+            elif signal == '매도' and position is not None:
+                ret = round((close - position['buy_price']) / position['buy_price'] * 100, 2)
+                realized.append(ret)
+                position = None
+
+        if position is not None:
+            latest = sdocs[-1].get('close')
+            if latest:
+                unrealized_pct = round((float(latest) - position['buy_price']) / position['buy_price'] * 100, 2)
+
+        if not realized and unrealized_pct is None:
+            continue
+
+        win = [r for r in realized if r > 0]
+        cumulative = 1.0
+        for r in realized:
+            cumulative *= (1 + r / 100)
+
+        result.append({
+            'stock_code': code,
+            'stock_name': name,
+            'total': len(realized),
+            'win': len(win),
+            'accuracy': round(len(win) / len(realized) * 100, 1) if realized else 0,
+            'avg_ret': round(sum(realized) / len(realized), 2) if realized else 0,
+            'cumulative_ret': round((cumulative - 1) * 100, 2) if realized else 0,
+            'max_ret': round(max(realized), 2) if realized else 0,
+            'min_ret': round(min(realized), 2) if realized else 0,
+            'unrealized_pct': unrealized_pct,
+        })
+
+    result.sort(key=lambda x: x['cumulative_ret'], reverse=True)
+    return result
 async def trigger_calculate_returns(
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(_db),
