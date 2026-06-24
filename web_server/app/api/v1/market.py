@@ -23,8 +23,7 @@ def _db() -> AsyncIOMotorDatabase:
     return get_db()
 
 
-# ── 스키마 ─────────────────────────────────────────────────────────────────────
-
+# 스키마
 class GlobalMarketItem(BaseModel):
     symbol: str
     name: str
@@ -49,6 +48,7 @@ class WinRateResult(BaseModel):
     avg_return_pct: float
     max_return_pct: float
     max_loss_pct: float
+    cumulative_return_pct: float  # 기간 전체 누적 수익률
     hold_days: int
 
 
@@ -60,7 +60,7 @@ class WinRateResponse(BaseModel):
     updated_at: datetime
 
 
-# ── 캐시 (10분) ────────────────────────────────────────────────────────────────
+# 캐시 (10분)
 _cache: dict = {"data": None, "ts": 0}
 CACHE_TTL = 600
 
@@ -189,9 +189,7 @@ async def _fetch_all_symbols() -> GlobalMarketResponse:
 
 
 @router.get("/global", response_model=GlobalMarketResponse, summary="글로벌 시장 현황")
-async def get_global_market(
-    _: dict = Depends(get_current_user),
-):
+async def get_global_market(_: dict = Depends(get_current_user)):
     now = time.time()
     if _cache["data"] is not None and (now - _cache["ts"]) < CACHE_TTL:
         return _cache["data"]
@@ -201,13 +199,11 @@ async def get_global_market(
     return data
 
 
-# ── 승률 테스트 ────────────────────────────────────────────────────────────────
-
+# 승률 테스트
 PERIOD_DAYS_MAP = {"1m": 30, "3m": 90, "6m": 180, "all": 99999}
 
 
 def _to_date(dt) -> datetime:
-    """datetime을 날짜 기준 UTC로 정규화"""
     if dt is None:
         return datetime.now(timezone.utc)
     if hasattr(dt, 'replace'):
@@ -217,9 +213,9 @@ def _to_date(dt) -> datetime:
 
 @router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트")
 async def get_win_rate(
-    stock_code: Optional[str] = Query(None, description="종목코드 (없으면 전체)"),
-    period: str = Query("3m", description="기간: 1m / 3m / 6m / all"),
-    hold_days: int = Query(5, ge=1, le=30, description="보유 일수 기준"),
+    stock_code: Optional[str] = Query(None),
+    period: str = Query("3m"),
+    hold_days: int = Query(5, ge=1, le=30),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
@@ -262,9 +258,7 @@ async def get_win_rate(
             continue
 
         dt_normalized = _to_date(dt)
-        target_days = timedelta(days=hold_days)
 
-        # 같은 종목에서 hold_days 후 가격 찾기 (±2일 허용)
         future_prices = [
             p_close for p_dt, p_close in price_map[sc]
             if timedelta(days=hold_days - 1) <= (p_dt - dt_normalized) <= timedelta(days=hold_days + 2)
@@ -272,7 +266,6 @@ async def get_win_rate(
 
         if future_prices:
             ret_pct = (future_prices[0] - float(close)) / float(close) * 100
-            # 비정상 수익률 필터 (-50% ~ +100% 범위 외 제외)
             if -50 <= ret_pct <= 100:
                 signal_returns[signal].append(round(ret_pct, 2))
 
@@ -282,6 +275,13 @@ async def get_win_rate(
             continue
         win = [r for r in returns if r > 0]
         lose = [r for r in returns if r <= 0]
+
+        # 누적 수익률: 복리 계산 (1 * (1+r1/100) * (1+r2/100) * ...)
+        cumulative = 1.0
+        for r in returns:
+            cumulative *= (1 + r / 100)
+        cumulative_pct = round((cumulative - 1) * 100, 2)
+
         results.append(WinRateResult(
             signal=signal,
             total_signals=len(returns),
@@ -291,6 +291,7 @@ async def get_win_rate(
             avg_return_pct=round(sum(returns) / len(returns), 2),
             max_return_pct=round(max(returns), 2),
             max_loss_pct=round(min(returns), 2),
+            cumulative_return_pct=cumulative_pct,
             hold_days=hold_days,
         ))
 

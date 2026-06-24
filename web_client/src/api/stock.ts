@@ -59,7 +59,9 @@ export interface GlobalMarketResponse {
 export interface WinRateResult {
   signal: string; total_signals: number;
   win_count: number; lose_count: number; win_rate: number;
-  avg_return_pct: number; max_return_pct: number; max_loss_pct: number; hold_days: number;
+  avg_return_pct: number; max_return_pct: number; max_loss_pct: number;
+  cumulative_return_pct?: number;
+  hold_days: number;
 }
 export interface WinRateResponse {
   stock_code: string | null; stock_name: string | null;
