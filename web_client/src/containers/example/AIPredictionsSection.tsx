@@ -6,7 +6,6 @@ type SignalFilter = '' | '매수' | '매도' | '관망';
 const SIGNAL_COLOR: Record<string, string> = {
   매수: '#16a34a', 매도: '#dc2626', 관망: '#d97706',
 };
-
 const SIGNAL_BG: Record<string, string> = {
   매수: '#14532d', 매도: '#7f1d1d', 관망: '#78350f',
 };
@@ -15,6 +14,19 @@ interface Props {
   onSelectStock: (stockCode: string, stockName: string) => void;
   selectedCode?: string;
 }
+
+const fmtPrice = (p: number) =>
+  p >= 1000000 ? `${(p / 1000000).toFixed(1)}M`
+  : p >= 1000  ? `${Math.round(p / 1000)}K`
+  : String(p);
+
+const fmtDate = (s: string) => {
+  if (!s) return '';
+  const d = new Date(s);
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${m}.${day}`;
+};
 
 const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) => {
   const [items, setItems] = useState<AIPredictionItem[]>([]);
@@ -34,11 +46,6 @@ const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) 
     setFilter(s);
     fetchPredictions(s);
   };
-
-  const fmtPrice = (p: number) =>
-    p >= 1000000 ? `${(p / 1000000).toFixed(1)}M`
-    : p >= 1000 ? `${Math.round(p / 1000)}K`
-    : String(p);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -68,7 +75,7 @@ const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) 
                 onClick={() => onSelectStock(item.stock_code, item.stock_name)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #13131e',
+                  padding: '5px 10px', cursor: 'pointer', borderBottom: '1px solid #13131e',
                   background: isActive ? '#1a1a30' : 'transparent',
                 }}
                 onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#151525'; }}
@@ -82,14 +89,19 @@ const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) 
                   {item.signal}
                 </span>
 
-                {/* 종목명 */}
-                <span style={{
-                  fontSize: 11, color: isActive ? '#a5b4fc' : '#d1d5db',
-                  flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  fontWeight: isActive ? 600 : 400,
-                }}>
-                  {item.stock_name}
-                </span>
+                {/* 종목명 + 날짜 */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 11, color: isActive ? '#a5b4fc' : '#d1d5db',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    fontWeight: isActive ? 600 : 400,
+                  }}>
+                    {item.stock_name}
+                  </div>
+                  <div style={{ fontSize: 9, color: '#4b5563' }}>
+                    {fmtDate(item.predicted_at)}
+                  </div>
+                </div>
 
                 {/* 현재가 + 변화율 */}
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
