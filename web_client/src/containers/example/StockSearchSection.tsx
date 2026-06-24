@@ -288,7 +288,15 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
         const futurePadding = futureDates.map((futureDate, i) => {
           const srcIdx = sorted.length - 26 + i;
           const ichi = srcIdx >= 0 ? ichimokuRaw[srcIdx] : null;
-          return { datetime: futureDate, spanA: ichi?.spanA ?? null, spanB: ichi?.spanB ?? null };
+          const spanA = ichi?.spanA ?? null;
+          const spanB = ichi?.spanB ?? null;
+          return {
+            datetime: futureDate,
+            spanA,
+            spanB,
+            cloudTop: spanA != null && spanB != null ? Math.max(spanA, spanB) : null,
+            cloudBottom: spanA != null && spanB != null ? Math.min(spanA, spanB) : null,
+          };
         });
 
         // AI 신호 매핑 - cutStr 필터 제거, 차트 기간 전체 포함

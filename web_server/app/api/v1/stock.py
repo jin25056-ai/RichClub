@@ -204,11 +204,11 @@ async def get_ai_predictions(
 
 @router.get("/ai/today", response_model=List[AIPredictionItem], summary="오늘 AI 예측 목록")
 async def get_today_predictions(
-    signal: Optional[str] = Query(None, description="매수 / 매도"),
+    signal: Optional[str] = Query(None, description="매수 / 매도 / 관망"),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """오늘 날짜 기준 AI 예측 목록 (매수/매도 파라미터)"""
+    """오늘 날짜 기준 AI 예측 목록 (매수/매도 파라미터), 전날 대비 등락률 포함"""
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     query: dict = {"predicted_at": {"$gte": today_start}}
     if signal in ("매수", "매도", "관망"):
@@ -226,15 +226,37 @@ async def get_today_predictions(
             seen.add(sname)
             deduped.append(doc)
 
+    # 전날 대비 등락률 계산
+    stock_names = list({doc.get("stock_name") for doc in deduped if doc.get("stock_name")})
+    prev_close_map: dict = {}
+    if stock_names:
+        pipeline = [
+            {"$match": {"stock_name": {"$in": stock_names}, "close": {"$ne": None}}},
+            {"$sort": {"predicted_at": -1}},
+            {"$group": {
+                "_id": "$stock_name",
+                "closes": {"$push": "$close"},
+            }},
+        ]
+        async for row in db.total_trading_signals.aggregate(pipeline):
+            closes = row.get("closes", [])
+            prev_close_map[row["_id"]] = closes[1] if len(closes) > 1 else None
+
     result = []
     for doc in deduped:
         signal_str = doc.get("signal", "관망")
         signal_label = {v: k for k, v in SIGNAL_MAP.items()}.get(signal_str, 2)
+        current_price = doc.get("close")
+        sname = doc.get("stock_name", "")
+        prev_close = prev_close_map.get(sname)
+        change_pct = None
+        if current_price and prev_close and prev_close != 0:
+            change_pct = round((current_price - prev_close) / prev_close * 100, 2)
         result.append(AIPredictionItem(
             stock_code=doc.get("stock_code", ""),
-            stock_name=doc.get("stock_name", ""),
-            current_price=doc.get("close"),
-            change_pct=None,
+            stock_name=sname,
+            current_price=current_price,
+            change_pct=change_pct,
             signal=signal_str,
             signal_label=signal_label,
             confidence=doc.get("confidence"),
