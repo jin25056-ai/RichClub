@@ -220,6 +220,9 @@ def _parse_date_input(s: str) -> datetime:
     if len(s) == 6 and s.isdigit():
         s = f"20{s[:2]}-{s[2:4]}-{s[4:6]}"
     return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+
+def _to_date(dt) -> datetime:
     if dt is None:
         return datetime.now(timezone.utc)
     if hasattr(dt, 'replace'):
