@@ -103,28 +103,33 @@ const tipRow = (lbl: string, val: any, color = '#e2e8f0') => val != null ? (
 ) : null;
 const fmt = (v: any) => v != null ? Math.round(v).toLocaleString() : null;
 
-const getMaState = (d: any) => {
-  if (!d || d.ma5 == null || d.ma20 == null || d.ma60 == null) return null;
-  if (d.ma5 > d.ma20 && d.ma20 > d.ma60) return { label: '정배열', color: '#16a34a' };
-  if (d.ma5 < d.ma20 && d.ma20 < d.ma60) return { label: '역배열', color: '#dc2626' };
-  return null;
-};
+const badge = (label: string, color: string) => (
+  <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: color + '22', color, border: '1px solid ' + color + '55', fontWeight: 600 }}>
+    {label}
+  </span>
+);
+
+const tipHeader = (label: string, ...badges: (React.ReactElement | null)[]) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 6 }}>
+    <span style={{ color: '#6366f1', fontWeight: 600 }}>{label}</span>
+    <span style={{ display: 'flex', gap: 4 }}>{badges}</span>
+  </div>
+);
 
 const CandleTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d || d.open == null) return null;
-  const maState = getMaState(d);
+  const maState = d.ma5 != null && d.ma20 != null && d.ma60 != null
+    ? d.ma5 > d.ma20 && d.ma20 > d.ma60 ? badge('정배열', '#16a34a')
+    : d.ma5 < d.ma20 && d.ma20 < d.ma60 ? badge('역배열', '#dc2626')
+    : null : null;
+  const crossBadge = d.goldenCross ? badge('골든크로스', '#facc15')
+    : d.deadCross ? badge('데드크로스', '#a855f7')
+    : null;
   return (
     <div style={TIP}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <span style={{ color: '#6366f1', fontWeight: 600 }}>{label}</span>
-        {maState && (
-          <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: maState.color + '22', color: maState.color, border: '1px solid ' + maState.color + '55', fontWeight: 600 }}>
-            {maState.label}
-          </span>
-        )}
-      </div>
+      {tipHeader(label, maState, crossBadge)}
       {tipRow('시가', fmt(d.open))}
       {tipRow('고가', fmt(d.high), '#16a34a')}
       {tipRow('저가', fmt(d.low), '#dc2626')}
@@ -143,20 +148,17 @@ const RsiTooltip = ({ active, payload, label }: any) => {
   const d = payload[0]?.payload;
   if (!d || d.rsi == null) return null;
   const rsi = d.rsi;
-  const rsiState = rsi >= 70 ? { label: '과매수', color: '#dc2626' }
-    : rsi <= 30 ? { label: '과매도', color: '#16a34a' }
+  const rsiBreak = d.rsiBreakDown ? badge('매도!', '#dc2626') : null;
+  const rsiLevel = rsi >= 70 ? badge('과매수', '#f97316')
+    : rsi <= 30 ? badge('과매도', '#16a34a')
     : null;
   return (
     <div style={TIP}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <span style={{ color: '#6366f1', fontWeight: 600 }}>{label}</span>
-        {rsiState && (
-          <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: rsiState.color + '22', color: rsiState.color, border: '1px solid ' + rsiState.color + '55', fontWeight: 600 }}>
-            {rsiState.label}
-          </span>
-        )}
-      </div>
+      {tipHeader(label, rsiBreak, rsiLevel)}
       {tipRow('RSI', rsi?.toFixed(2), '#6366f1')}
+      {d.rsiBreakDown && (
+        <div style={{ marginTop: 4, fontSize: 9, color: '#dc2626', fontWeight: 600 }}>RSI 70 하방이탈 - 매도 신호</div>
+      )}
     </div>
   );
 };
@@ -166,21 +168,14 @@ const MacdTooltip = ({ active, payload, label }: any) => {
   const d = payload[0]?.payload;
   if (!d || d.macd == null) return null;
   const hist = d.histogram ?? 0;
-  const histState = hist > 0 && d.macd > 0 ? { label: '상승 모멘텀', color: '#16a34a' }
-    : hist < 0 && d.macd < 0 ? { label: '하락 모멘텀', color: '#dc2626' }
-    : hist > 0 ? { label: '반등 시도', color: '#4ade80' }
-    : hist < 0 ? { label: '조정 진행', color: '#f87171' }
+  const macdBadge = d.macd > d.macdSignal
+    ? badge('MACD 위 (매수 우호)', '#16a34a')
+    : d.macd < d.macdSignal
+    ? badge('시그널 위 (매도 우호)', '#dc2626')
     : null;
   return (
     <div style={TIP}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <span style={{ color: '#6366f1', fontWeight: 600 }}>{label}</span>
-        {histState && (
-          <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: histState.color + '22', color: histState.color, border: '1px solid ' + histState.color + '55', fontWeight: 600 }}>
-            {histState.label}
-          </span>
-        )}
-      </div>
+      {tipHeader(label, macdBadge)}
       {tipRow('MACD',      fmt(d.macd),      '#6366f1')}
       {tipRow('시그널',    fmt(d.macdSignal), '#f59e0b')}
       {tipRow('히스토그램', fmt(d.histogram),  hist >= 0 ? '#16a34a' : '#dc2626')}
@@ -224,9 +219,17 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     const { trimmed, futurePadding, sigMap } = rawData;
     const all = [...trimmed, ...futurePadding];
     const finalData = all.map((row, i) => {
-      const prevMa5 = i > 0 ? all[i - 1].ma5 : null;
-      const simpleSell = sellMode === 'simple' && row.ma5 != null && prevMa5 != null && row.ma5 < prevMa5;
-      return { ...row, aiSignal: sigMap[row.datetime] ?? null, simpleSell };
+      const prev = i > 0 ? all[i - 1] : null;
+      const simpleSell = sellMode === 'simple' && row.ma5 != null && prev?.ma5 != null && row.ma5 < prev.ma5;
+      // 골든크로스: 전날 ma5 < ma20, 오늘 ma5 > ma20
+      const goldenCross = prev?.ma5 != null && prev?.ma20 != null && row.ma5 != null && row.ma20 != null
+        && prev.ma5 < prev.ma20 && row.ma5 > row.ma20;
+      // 데드크로스: 전날 ma5 > ma20, 오늘 ma5 < ma20
+      const deadCross = prev?.ma5 != null && prev?.ma20 != null && row.ma5 != null && row.ma20 != null
+        && prev.ma5 > prev.ma20 && row.ma5 < row.ma20;
+      // RSI 70 하방이탈: 전날 rsi >= 70, 오늘 rsi < 70
+      const rsiBreakDown = prev?.rsi != null && row.rsi != null && prev.rsi >= 70 && row.rsi < 70;
+      return { ...row, aiSignal: sigMap[row.datetime] ?? null, simpleSell, goldenCross, deadCross, rsiBreakDown };
     });
     setChartData(finalData);
     setViewRange(null);
