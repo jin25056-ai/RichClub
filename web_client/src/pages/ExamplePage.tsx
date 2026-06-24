@@ -66,7 +66,7 @@ const ExamplePage: React.FC = () => {
           </div>
           <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px' }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 8 }}>승률 테스트</div>
-            <WinRateSection compact />
+            <WinRateSection compact stockCode={selectedStock?.code} />
           </div>
         </div>
 
