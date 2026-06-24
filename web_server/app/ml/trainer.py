@@ -95,8 +95,9 @@ def _fetch_market_data(start: str, end: str) -> dict:
         if mkt.empty:
             return {}
         if isinstance(mkt.columns, pd.MultiIndex):
-            sp500 = mkt[('Close', '^GSPC')]
-            vix = mkt[('Close', '^VIX')]
+            # yfinance 1.4+: ('Close', '^GSPC') 형태
+            sp500 = mkt['Close']['^GSPC'] if '^GSPC' in mkt['Close'].columns else mkt['Close'].iloc[:, 0]
+            vix = mkt['Close']['^VIX'] if '^VIX' in mkt['Close'].columns else mkt['Close'].iloc[:, 1]
         else:
             sp500 = mkt['Close']
             vix = mkt['Close']
@@ -114,10 +115,15 @@ def _fetch_market_data(start: str, end: str) -> dict:
 
 def _build_features(raw: pd.DataFrame, market_map: dict, stock_name: str) -> pd.DataFrame:
     df = raw.copy()
+    # yfinance 1.4+ MultiIndex 처리: ('Close', 'TICKER') -> 'Close'
     if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.droplevel(1)
+        # 단일 종목이면 ticker 레벨 제거
+        if df.columns.nlevels == 2:
+            df.columns = df.columns.get_level_values(0)
+        else:
+            df.columns = df.columns.droplevel(-1)
     df.columns = [c.lower() for c in df.columns]
-    df = df.rename(columns={'adj close': 'close'})
+    df = df.rename(columns={'adj close': 'close', 'price': 'close'})
     df.index = pd.to_datetime(df.index)
     df = df.dropna(subset=['close'])
     df['stock_name'] = stock_name
