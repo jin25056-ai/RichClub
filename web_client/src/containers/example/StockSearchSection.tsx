@@ -434,7 +434,12 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           </ResponsiveContainer>
 
           {/* MACD - 매수 신호 위 */}
-          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2 }}>MACD</div>
+          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span>MACD</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 14, height: 2, background: '#6366f1', display: 'inline-block' }} />MACD</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 14, height: 2, background: '#f59e0b', display: 'inline-block' }} />시그널</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 8, height: 8, background: '#16a34a', display: 'inline-block', borderRadius: 1 }} />양/음봉</span>
+          </div>
           <ResponsiveContainer width="100%" height={heights.macd}>
             <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
@@ -453,7 +458,12 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           </ResponsiveContainer>
 
           {/* RSI - 매도 신호 아래 */}
-          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2 }}>RSI (14)</div>
+          <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span>RSI (14)</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 14, height: 2, background: '#6366f1', display: 'inline-block' }} />RSI</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#dc2626', fontSize: 9 }}>— 70 과매수</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#16a34a', fontSize: 9 }}>— 30 과매도</span>
+          </div>
           <ResponsiveContainer width="100%" height={heights.rsi}>
             <ComposedChart data={chartData} syncId={SYNC_ID} margin={{ ...MARGIN, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
