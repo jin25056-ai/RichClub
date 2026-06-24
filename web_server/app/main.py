@@ -17,6 +17,7 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:5173",
     "https://rich-club-front-end.vercel.app",
+    "https://richclub-client.efforthye.dev",
     *(getenv("ALLOWED_ORIGINS", "").split(",") if getenv("ALLOWED_ORIGINS") else []),
 ]
 
