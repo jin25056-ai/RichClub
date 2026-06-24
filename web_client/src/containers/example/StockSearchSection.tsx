@@ -65,23 +65,23 @@ const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) =
   const bodyTop = Math.min(openY, closeY);
   const bodyH   = Math.max(Math.abs(openY - closeY), 1);
   const bw = Math.max(width - 2, 2); const cx = x + width / 2;
-  const badge = aiSignal && SIGNAL_BADGE[aiSignal] ? SIGNAL_BADGE[aiSignal] : null;
-  const showSimpleSell = simpleSell && !badge;
+  const b = aiSignal && SIGNAL_BADGE[aiSignal] ? SIGNAL_BADGE[aiSignal] : null;
+  const showSimpleSell = simpleSell && !b;
   return (
     <g>
       <line x1={cx} y1={highY} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1.5} />
       <line x1={cx} y1={bodyTop + bodyH} x2={cx} y2={lowY} stroke={color} strokeWidth={1.5} />
       <rect x={cx - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={color} stroke={color} strokeWidth={1} />
-      {badge && aiSignal === '매도' && (
+      {b && aiSignal === '매도' && (
         <g>
-          <rect x={cx - 12} y={highY - 14} width={24} height={11} rx={2} fill={badge.bg} />
-          <text x={cx} y={highY - 6} textAnchor="middle" fontSize={6} fontWeight="700" fill={badge.color}>SELL</text>
+          <rect x={cx - 12} y={highY - 14} width={24} height={11} rx={2} fill={b.bg} />
+          <text x={cx} y={highY - 6} textAnchor="middle" fontSize={6} fontWeight="700" fill={b.color}>SELL</text>
         </g>
       )}
-      {badge && aiSignal === '매수' && (
+      {b && aiSignal === '매수' && (
         <g>
-          <rect x={cx - 12} y={lowY + 3} width={24} height={11} rx={2} fill={badge.bg} />
-          <text x={cx} y={lowY + 11} textAnchor="middle" fontSize={6} fontWeight="700" fill={badge.color}>{badge.label}</text>
+          <rect x={cx - 12} y={lowY + 3} width={24} height={11} rx={2} fill={b.bg} />
+          <text x={cx} y={lowY + 11} textAnchor="middle" fontSize={6} fontWeight="700" fill={b.color}>{b.label}</text>
         </g>
       )}
       {showSimpleSell && (
@@ -95,16 +95,18 @@ const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) =
 };
 
 const TIP = { background: '#12121f', border: '1px solid #2d2d3d', borderRadius: 6, padding: '7px 10px', fontSize: 11, minWidth: 140 };
+
 const tipRow = (lbl: string, val: any, color = '#e2e8f0') => val != null ? (
   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
     <span style={{ color: '#777' }}>{lbl}</span>
     <span style={{ color, fontWeight: 500 }}>{val}</span>
   </div>
 ) : null;
+
 const fmt = (v: any) => v != null ? Math.round(v).toLocaleString() : null;
 
-const badge = (label: string, color: string) => (
-  <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: color + '22', color, border: '1px solid ' + color + '55', fontWeight: 600 }}>
+const bdg = (label: string, color: string) => (
+  <span key={label} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: color + '22', color, border: '1px solid ' + color + '55', fontWeight: 600 }}>
     {label}
   </span>
 );
@@ -112,24 +114,60 @@ const badge = (label: string, color: string) => (
 const tipHeader = (label: string, ...badges: (React.ReactElement | null)[]) => (
   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 6 }}>
     <span style={{ color: '#6366f1', fontWeight: 600 }}>{label}</span>
-    <span style={{ display: 'flex', gap: 4 }}>{badges}</span>
+    <span style={{ display: 'flex', gap: 4 }}>{badges.filter(Boolean)}</span>
   </div>
 );
+
+const getCompositeSignal = (d: any) => {
+  if (!d) return null;
+  if (d.rsiBreakDown) return { label: '강한 매도', sub: 'RSI 70 하방이탈', color: '#dc2626' };
+
+  let bull = 0;
+  let bear = 0;
+
+  if (d.ma5 != null && d.ma20 != null && d.ma60 != null) {
+    if (d.ma5 > d.ma20 && d.ma20 > d.ma60) bull++;
+    else if (d.ma5 < d.ma20 && d.ma20 < d.ma60) bear++;
+  }
+  if (d.macd != null && d.macdSignal != null) {
+    if (d.macd > d.macdSignal) bull++;
+    else if (d.macd < d.macdSignal) bear++;
+  }
+  if (d.rsi != null) {
+    if (d.rsi <= 30) bull++;
+    else if (d.rsi >= 70) bear++;
+    else bull += 0.5;
+  }
+
+  const score = bull - bear;
+  if (score >= 2.5) return { label: '강한 매수', sub: '3개 지표 매수', color: '#16a34a' };
+  if (score >= 1.5) return { label: '매수 우세', sub: '2개 지표 매수', color: '#4ade80' };
+  if (score <= -2)  return { label: '강한 매도', sub: '3개 지표 매도', color: '#dc2626' };
+  if (score <= -1)  return { label: '매도 우세', sub: '2개 지표 매도', color: '#f87171' };
+  return { label: '중립', sub: '지표 혼재', color: '#6b7280' };
+};
 
 const CandleTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d || d.open == null) return null;
   const maState = d.ma5 != null && d.ma20 != null && d.ma60 != null
-    ? d.ma5 > d.ma20 && d.ma20 > d.ma60 ? badge('정배열', '#16a34a')
-    : d.ma5 < d.ma20 && d.ma20 < d.ma60 ? badge('역배열', '#dc2626')
+    ? d.ma5 > d.ma20 && d.ma20 > d.ma60 ? bdg('정배열', '#16a34a')
+    : d.ma5 < d.ma20 && d.ma20 < d.ma60 ? bdg('역배열', '#dc2626')
     : null : null;
-  const crossBadge = d.goldenCross ? badge('골든크로스', '#facc15')
-    : d.deadCross ? badge('데드크로스', '#a855f7')
+  const crossBadge = d.goldenCross ? bdg('골든크로스', '#facc15')
+    : d.deadCross ? bdg('데드크로스', '#a855f7')
     : null;
+  const composite = getCompositeSignal(d);
   return (
     <div style={TIP}>
       {tipHeader(label, maState, crossBadge)}
+      {composite && (
+        <div style={{ margin: '4px 0 6px', padding: '4px 8px', borderRadius: 4, background: composite.color + '18', border: '1px solid ' + composite.color + '44', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: composite.color }}>{composite.label}</span>
+          <span style={{ fontSize: 9, color: composite.color + 'cc' }}>{composite.sub}</span>
+        </div>
+      )}
       {tipRow('시가', fmt(d.open))}
       {tipRow('고가', fmt(d.high), '#16a34a')}
       {tipRow('저가', fmt(d.low), '#dc2626')}
@@ -148,9 +186,9 @@ const RsiTooltip = ({ active, payload, label }: any) => {
   const d = payload[0]?.payload;
   if (!d || d.rsi == null) return null;
   const rsi = d.rsi;
-  const rsiBreak = d.rsiBreakDown ? badge('매도!', '#dc2626') : null;
-  const rsiLevel = rsi >= 70 ? badge('과매수', '#f97316')
-    : rsi <= 30 ? badge('과매도', '#16a34a')
+  const rsiBreak = d.rsiBreakDown ? bdg('매도!', '#dc2626') : null;
+  const rsiLevel = rsi >= 70 ? bdg('과매수', '#f97316')
+    : rsi <= 30 ? bdg('과매도', '#16a34a')
     : null;
   return (
     <div style={TIP}>
@@ -169,9 +207,9 @@ const MacdTooltip = ({ active, payload, label }: any) => {
   if (!d || d.macd == null) return null;
   const hist = d.histogram ?? 0;
   const macdBadge = d.macd > d.macdSignal
-    ? badge('MACD 위 (매수 우호)', '#16a34a')
+    ? bdg('MACD 위 (매수 우호)', '#16a34a')
     : d.macd < d.macdSignal
-    ? badge('시그널 위 (매도 우호)', '#dc2626')
+    ? bdg('시그널 위 (매도 우호)', '#dc2626')
     : null;
   return (
     <div style={TIP}>
@@ -221,13 +259,10 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     const finalData = all.map((row, i) => {
       const prev = i > 0 ? all[i - 1] : null;
       const simpleSell = sellMode === 'simple' && row.ma5 != null && prev?.ma5 != null && row.ma5 < prev.ma5;
-      // 골든크로스: 전날 ma5 < ma20, 오늘 ma5 > ma20
       const goldenCross = prev?.ma5 != null && prev?.ma20 != null && row.ma5 != null && row.ma20 != null
         && prev.ma5 < prev.ma20 && row.ma5 > row.ma20;
-      // 데드크로스: 전날 ma5 > ma20, 오늘 ma5 < ma20
       const deadCross = prev?.ma5 != null && prev?.ma20 != null && row.ma5 != null && row.ma20 != null
         && prev.ma5 > prev.ma20 && row.ma5 < row.ma20;
-      // RSI 70 하방이탈: 전날 rsi >= 70, 오늘 rsi < 70
       const rsiBreakDown = prev?.rsi != null && row.rsi != null && prev.rsi >= 70 && row.rsi < 70;
       return { ...row, aiSignal: sigMap[row.datetime] ?? null, simpleSell, goldenCross, deadCross, rsiBreakDown };
     });
