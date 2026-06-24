@@ -146,18 +146,23 @@ async def get_ai_predictions(
     cursor = db.total_trading_signals.find(query).sort("predicted_at", -1).limit(limit)
     docs = [doc async for doc in cursor]
 
-    # 각 종목의 직전 close 조회 (변화율 계산용)
+    # 종목별 직전 close를 aggregate 한 방에 조회
+    stock_names = list({doc.get("stock_name") for doc in docs if doc.get("stock_name")})
     prev_close_map: dict = {}
-    for doc in docs:
-        sname = doc.get("stock_name", "")
-        predicted_at = doc.get("predicted_at")
-        if sname and predicted_at and sname not in prev_close_map:
-            prev_doc = await db.total_trading_signals.find_one(
-                {"stock_name": sname, "predicted_at": {"$lt": predicted_at}, "close": {"$ne": None}},
-                {"close": 1},
-                sort=[("predicted_at", -1)],
-            )
-            prev_close_map[sname] = prev_doc.get("close") if prev_doc else None
+
+    if stock_names:
+        pipeline = [
+            {"$match": {"stock_name": {"$in": stock_names}, "close": {"$ne": None}}},
+            {"$sort": {"predicted_at": -1}},
+            {"$group": {
+                "_id": "$stock_name",
+                "closes": {"$push": "$close"},
+            }},
+        ]
+        async for row in db.total_trading_signals.aggregate(pipeline):
+            closes = row.get("closes", [])
+            # closes[0] = 최신, closes[1] = 직전
+            prev_close_map[row["_id"]] = closes[1] if len(closes) > 1 else None
 
     result = []
     for doc in docs:
