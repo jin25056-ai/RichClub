@@ -109,7 +109,7 @@ const bdg = (label: string, color: string) => (
   <span key={label} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: color + '22', color, border: '1px solid ' + color + '55', fontWeight: 600 }}>
     {label}
   </span>
-);
+); 
 
 const tipHeader = (label: string, ...badges: (React.ReactElement | null)[]) => (
   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 6 }}>
