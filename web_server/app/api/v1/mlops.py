@@ -219,7 +219,7 @@ async def get_stock_performance(
             if latest:
                 unrealized_pct = round((float(latest) - position['buy_price']) / position['buy_price'] * 100, 2)
 
-        if not realized and unrealized_pct is None:
+        if not realized:
             continue
 
         win = [r for r in realized if r > 0]
@@ -241,7 +241,7 @@ async def get_stock_performance(
         })
 
     result.sort(key=lambda x: x['cumulative_ret'], reverse=True)
-    return result
+    return result[:100]
 async def trigger_calculate_returns(
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(_db),
