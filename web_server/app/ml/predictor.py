@@ -168,7 +168,13 @@ async def evaluate_predictions(db: AsyncIOMotorDatabase):
         eval_str = eval_date.strftime('%Y-%m-%d')
         end_str = (eval_date + timedelta(days=3)).strftime('%Y-%m-%d')
         code = doc.get('stock_code', '')
-        ticker = code + '.KS' if code else ''
+        if not code or not code.isdigit():
+            # stock_code 없으면 DB에서 조회
+            sig = await db.total_trading_signals.find_one({'stock_name': name}, {'stock_code': 1})
+            code = sig.get('stock_code', '') if sig else ''
+        ticker = code + '.KS' if code and code.isdigit() else ''
+        if not ticker:
+            continue
 
         try:
             raw = await asyncio.get_event_loop().run_in_executor(

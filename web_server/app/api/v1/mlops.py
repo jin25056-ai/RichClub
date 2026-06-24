@@ -10,7 +10,7 @@ import os
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 
@@ -169,9 +169,10 @@ async def trigger_train(
 
 @router.post("/evaluate", summary="예측 성능 수동 평가")
 async def trigger_evaluate(
+    background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
     from app.ml.predictor import evaluate_predictions
-    await evaluate_predictions(db)
-    return {'status': 'done'}
+    background_tasks.add_task(evaluate_predictions, db)
+    return {'status': 'started', 'message': '백그라운드에서 평가 중. 잠시 후 새로고침하세요.'}

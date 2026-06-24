@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:5173",
-    # 버셀 배포 주소 - 환경변수로 추가 가능
+    "https://rich-club-front-end.vercel.app",
     *(getenv("ALLOWED_ORIGINS", "").split(",") if getenv("ALLOWED_ORIGINS") else []),
 ]
 
 
 async def _ensure_indexes() -> None:
     db = get_db()
-    await db.users.create_index([("email", ASCENDING)], unique=True, name="idx_users_email")
+    await db.users.create_index([(("email", ASCENDING))], unique=True, name="idx_users_email")
     logger.info("[MongoDB] 인덱스 설정 완료")
 
 
@@ -67,7 +67,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,  # 쿠키 전송 허용
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
