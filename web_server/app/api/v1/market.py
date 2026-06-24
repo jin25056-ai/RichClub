@@ -384,3 +384,161 @@ async def get_win_rate(
         trades=trades,
         updated_at=datetime.now(timezone.utc),
     )
+
+
+@router.get("/winrate/simple", response_model=WinRateResponse, summary="단순 승률 테스트 (5일선 꺾임 매도)")
+async def get_win_rate_simple(
+    stock_code: Optional[str] = Query(None),
+    period: str = Query("3m"),
+    hold_days: int = Query(5, ge=1, le=30),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """
+    단순 승률 테스트
+    - 매수 신호: AI 예측 매수 신호와 동일
+    - 매도 신호: 5일선이 상승하다가 꺾이는 날 (ma5 < 전날 ma5)
+    """
+    if period not in PERIOD_DAYS_MAP:
+        raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
+
+    if start_date:
+        try:
+            since = _parse_date_input(start_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="start_date 형식 오류")
+    else:
+        days = PERIOD_DAYS_MAP[period]
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    if end_date:
+        try:
+            until = _parse_date_input(end_date) + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="end_date 형식 오류")
+    else:
+        until = datetime.now(timezone.utc) + timedelta(days=1)
+
+    query: dict = {"predicted_at": {"$gte": since, "$lt": until}}
+    if stock_code:
+        query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
+
+    cursor = db.total_trading_signals.find(query).sort("predicted_at", 1)
+    docs = [doc async for doc in cursor]
+
+    if not docs:
+        raise HTTPException(status_code=404, detail="해당 기간의 데이터가 없습니다.")
+
+    stock_name = docs[0].get("stock_name") if docs else None
+
+    sc_docs: dict = defaultdict(list)
+    for doc in docs:
+        sc = doc.get("stock_code", "")
+        if sc:
+            sc_docs[sc].append(doc)
+
+    trades: list = []
+    realized_returns: list = []
+    unrealized_positions: list = []
+
+    for sc, sdocs in sc_docs.items():
+        position = None
+        latest_price = None
+        prev_ma5 = None
+
+        for doc in sdocs:
+            signal = doc.get("signal", "관망")
+            dt = _to_date(doc.get("predicted_at"))
+            close = doc.get("close")
+            ma5 = doc.get("ma5")
+            if close is None:
+                continue
+            close = float(close)
+            latest_price = close
+            date_str = dt.strftime("%Y-%m-%d")
+
+            # 5일선 꺾임 감지: 이전 ma5보다 현재 ma5가 낮아진 경우
+            ma5_turning_down = False
+            if ma5 is not None and prev_ma5 is not None:
+                ma5_turning_down = float(ma5) < float(prev_ma5)
+
+            # 매수: AI 매수 신호 기준
+            if signal == "매수" and position is None:
+                position = {"buy_date": date_str, "buy_price": close}
+
+            # 매도: 5일선 꺾임 (포지션 보유 중일 때만)
+            elif ma5_turning_down and position is not None:
+                ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
+                trades.append(TradeRecord(
+                    buy_date=position["buy_date"],
+                    buy_price=position["buy_price"],
+                    sell_date=date_str,
+                    sell_price=close,
+                    return_pct=ret_pct,
+                ))
+                realized_returns.append(ret_pct)
+                position = None
+
+            if ma5 is not None:
+                prev_ma5 = float(ma5)
+
+        # 미실현 포지션
+        if position is not None and latest_price is not None:
+            unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
+            unrealized_positions.append(unrealized_pct)
+            trades.append(TradeRecord(
+                buy_date=position["buy_date"],
+                buy_price=position["buy_price"],
+                sell_date=None,
+                sell_price=latest_price,
+                unrealized_pct=unrealized_pct,
+            ))
+
+    results = []
+    if realized_returns:
+        win = [r for r in realized_returns if r > 0]
+        lose = [r for r in realized_returns if r <= 0]
+        cumulative = 1.0
+        for r in realized_returns:
+            cumulative *= (1 + r / 100)
+        cumulative_pct = round((cumulative - 1) * 100, 2)
+        avg_unrealized = round(sum(unrealized_positions) / len(unrealized_positions), 2) if unrealized_positions else None
+        results.append(WinRateResult(
+            signal="매수(AI)→매도(5일선꺾임)",
+            total_signals=len(realized_returns),
+            win_count=len(win),
+            lose_count=len(lose),
+            win_rate=round(len(win) / len(realized_returns) * 100, 1) if realized_returns else 0,
+            avg_return_pct=round(sum(realized_returns) / len(realized_returns), 2),
+            max_return_pct=round(max(realized_returns), 2),
+            max_loss_pct=round(min(realized_returns), 2),
+            cumulative_return_pct=cumulative_pct,
+            unrealized_pct=avg_unrealized,
+            hold_days=hold_days,
+        ))
+    elif unrealized_positions:
+        avg_unrealized = round(sum(unrealized_positions) / len(unrealized_positions), 2)
+        results.append(WinRateResult(
+            signal="매수(AI)→보유중",
+            total_signals=0,
+            win_count=0,
+            lose_count=0,
+            win_rate=0,
+            avg_return_pct=0,
+            max_return_pct=0,
+            max_loss_pct=0,
+            cumulative_return_pct=0,
+            unrealized_pct=avg_unrealized,
+            hold_days=hold_days,
+        ))
+
+    return WinRateResponse(
+        stock_code=stock_code,
+        stock_name=stock_name,
+        period=period,
+        results=results,
+        trades=trades,
+        updated_at=datetime.now(timezone.utc),
+    )
