@@ -35,6 +35,11 @@ const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) 
     fetchPredictions(s);
   };
 
+  const fmtPrice = (p: number) =>
+    p >= 1000000 ? `${(p / 1000000).toFixed(1)}M`
+    : p >= 1000 ? `${Math.round(p / 1000)}K`
+    : String(p);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 필터 */}
@@ -74,26 +79,32 @@ const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) 
                   width: 26, textAlign: 'center', fontSize: 9, padding: '1px 2px', borderRadius: 3, flexShrink: 0,
                   background: SIGNAL_BG[item.signal], color: SIGNAL_COLOR[item.signal], fontWeight: 700,
                 }}>
-                  {item.signal === '관망' ? '관망' : item.signal}
+                  {item.signal}
                 </span>
+
                 {/* 종목명 */}
                 <span style={{
-                  fontSize: 12, color: isActive ? '#a5b4fc' : '#d1d5db',
+                  fontSize: 11, color: isActive ? '#a5b4fc' : '#d1d5db',
                   flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   fontWeight: isActive ? 600 : 400,
                 }}>
                   {item.stock_name}
                 </span>
-                {/* 현재가 */}
-                <span style={{ fontSize: 10, color: '#6b7280', flexShrink: 0 }}>
-                  {item.current_price != null
-                    ? item.current_price >= 1000000
-                      ? `${(item.current_price / 1000000).toFixed(1)}M`
-                      : item.current_price >= 1000
-                        ? `${Math.round(item.current_price / 1000)}K`
-                        : item.current_price
-                    : '-'}
-                </span>
+
+                {/* 현재가 + 변화율 */}
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontSize: 10, color: '#9ca3af' }}>
+                    {item.current_price != null ? fmtPrice(item.current_price) : '-'}
+                  </div>
+                  {item.change_pct != null && (
+                    <div style={{
+                      fontSize: 9,
+                      color: item.change_pct > 0 ? '#16a34a' : item.change_pct < 0 ? '#dc2626' : '#6b7280',
+                    }}>
+                      {item.change_pct > 0 ? '+' : ''}{item.change_pct.toFixed(2)}%
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}

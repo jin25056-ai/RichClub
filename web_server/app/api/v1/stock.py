@@ -142,15 +142,38 @@ async def get_ai_predictions(
         query["signal"] = signal
     if stock_name:
         query["stock_name"] = stock_name
+
     cursor = db.total_trading_signals.find(query).sort("predicted_at", -1).limit(limit)
+    docs = [doc async for doc in cursor]
+
+    # 각 종목의 직전 close 조회 (변화율 계산용)
+    prev_close_map: dict = {}
+    for doc in docs:
+        sname = doc.get("stock_name", "")
+        predicted_at = doc.get("predicted_at")
+        if sname and predicted_at and sname not in prev_close_map:
+            prev_doc = await db.total_trading_signals.find_one(
+                {"stock_name": sname, "predicted_at": {"$lt": predicted_at}, "close": {"$ne": None}},
+                {"close": 1},
+                sort=[("predicted_at", -1)],
+            )
+            prev_close_map[sname] = prev_doc.get("close") if prev_doc else None
+
     result = []
-    async for doc in cursor:
+    for doc in docs:
         signal_str = doc.get("signal", "관망")
         signal_label = {v: k for k, v in SIGNAL_MAP.items()}.get(signal_str, 2)
+        current_price = doc.get("close")
+        sname = doc.get("stock_name", "")
+        prev_close = prev_close_map.get(sname)
+        change_pct = None
+        if current_price and prev_close and prev_close != 0:
+            change_pct = round((current_price - prev_close) / prev_close * 100, 2)
         result.append(AIPredictionItem(
             stock_code=doc.get("stock_code", ""),
-            stock_name=doc.get("stock_name", ""),
-            current_price=doc.get("close"),
+            stock_name=sname,
+            current_price=current_price,
+            change_pct=change_pct,
             signal=signal_str,
             signal_label=signal_label,
             confidence=doc.get("confidence"),
@@ -310,7 +333,6 @@ async def get_candles(
         return CandleResponse(stock_code=stock_code, interval="1d", data=data)
 
     # 3) DB 데이터 부족 → yfinance 직접 수집
-    # stock_code가 6자리 숫자면 바로 티커로 사용, 아니면 DB에서 조회
     if _is_code(stock_code):
         ticker_code = stock_code
     else:
