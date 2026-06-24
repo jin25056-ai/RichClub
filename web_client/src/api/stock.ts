@@ -123,4 +123,7 @@ export const marketApi = {
 
   getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate', { params }),
+
+  getWinRateSimple: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
+    apiClient.get<WinRateResponse>('/api/v1/market/winrate/simple', { params }),
 };

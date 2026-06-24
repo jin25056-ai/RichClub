@@ -22,6 +22,7 @@ const inputStyle: React.CSSProperties = {
 };
 
 const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
+  const [tab, setTab] = useState<'ai' | 'simple'>('ai');
   const [period, setPeriod] = useState('3m');
   const [useCustomDate, setUseCustomDate] = useState(false);
   const [startDate, setStartDate] = useState('');
@@ -31,9 +32,10 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
   const [loading, setLoading] = useState(false);
   const [inputAmt, setInputAmt] = useState('1000000');
 
-  const fetchData = (p: string, sc?: string, sd?: string, ed?: string) => {
+  const fetchData = (p: string, sc?: string, sd?: string, ed?: string, t: 'ai' | 'simple' = tab) => {
     setLoading(true);
-    marketApi.getWinRate({
+    const apiFn = t === 'simple' ? marketApi.getWinRateSimple : marketApi.getWinRate;
+    apiFn({
       stock_code: sc || undefined,
       period: p,
       hold_days: 5,
@@ -46,6 +48,11 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
       })
       .catch(() => { setResults([]); setTrades([]); })
       .finally(() => setLoading(false));
+  };
+
+  const handleTab = (t: 'ai' | 'simple') => {
+    setTab(t);
+    fetchData(period, stockCode, useCustomDate ? startDate : undefined, useCustomDate ? endDate : undefined, t);
   };
 
   useEffect(() => {
@@ -77,6 +84,25 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
 
   return (
     <div>
+      {/* AI / 단순 탭 */}
+      <div style={{ display: 'flex', gap: 3, marginBottom: 4 }}>
+        {([['ai', 'AI'], ['simple', '단순']] as const).map(([t, label]) => (
+          <button key={t} onClick={() => handleTab(t)}
+            style={{
+              padding: '3px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer',
+              background: tab === t ? '#6366f1' : '#1e1e2e',
+              color: tab === t ? '#fff' : '#888', fontWeight: tab === t ? 600 : 400,
+            }}>{label}</button>
+        ))}
+      </div>
+      {/* 매도 규칙 표시 */}
+      <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 8, paddingLeft: 2 }}>
+        매도규칙 {tab === 'ai'
+          ? <span style={{ color: '#6366f1' }}>AI 매도 시그널</span>
+          : <span style={{ color: '#d97706' }}>단순지표 (5일선 이탈)</span>
+        }
+      </div>
+
       {/* 기간 선택 */}
       <div style={{ marginBottom: 8 }}>
         <div style={{ display: 'flex', gap: 3, marginBottom: 5, alignItems: 'center' }}>
