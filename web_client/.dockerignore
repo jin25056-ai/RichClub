@@ -1,0 +1,8 @@
+node_modules
+build
+.git
+.gitignore
+README.md
+Dockerfile
+Jenkinsfile
+nginx.conf
