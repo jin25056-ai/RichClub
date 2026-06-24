@@ -307,3 +307,10 @@
 *::-webkit-scrollbar-thumb:hover {
   background: #3d3d5d;
 }
+
+/* recharts 클릭 outline 제거 */
+.recharts-wrapper,
+.recharts-surface,
+.recharts-wrapper *:focus {
+  outline: none !important;
+}

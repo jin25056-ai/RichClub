@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Bar, Cell, Legend,
@@ -8,7 +8,6 @@ import { stockApi, StockItem } from '../../api/stock';
 type Period = '1m' | '3m' | '6m';
 
 const Y_AXIS_WIDTH = 58;
-const Y_AXIS_WIDTH_SMALL = 10; // MACD용 숫자 없는 축
 const SYNC_ID = 'stock-sync';
 const MARGIN = { left: 0, right: 10, top: 4, bottom: 0 };
 const PERIOD_EXTRA = 60;
@@ -124,21 +123,6 @@ const CandleTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-const IchimokuTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]?.payload;
-  if (!d || (d.tenkan == null && d.spanA == null)) return null;
-  return (
-    <div style={TIP}>
-      <div style={{ color: '#6366f1', marginBottom: 4, fontWeight: 600 }}>{label}</div>
-      {tipRow('전환선', fmt(d.tenkan), '#38bdf8')}
-      {tipRow('기준선', fmt(d.kijun),  '#f472b6')}
-      {tipRow('선행A',  fmt(d.spanA),  '#4ade80')}
-      {tipRow('선행B',  fmt(d.spanB),  '#f87171')}
-    </div>
-  );
-};
-
 const RsiTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
@@ -185,6 +169,10 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
   const [error, setError] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [heights, setHeights] = useState(getChartHeights());
+  const [viewRange, setViewRange] = useState<[number, number] | null>(null);
+  const chartWrapRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startX: number; startRange: [number, number] } | null>(null);
+  const isDragging = useRef(false);
 
   useEffect(() => {
     const onResize = () => setHeights(getChartHeights());
@@ -202,7 +190,73 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       return { ...row, aiSignal: sigMap[row.datetime] ?? null, simpleSell };
     });
     setChartData(finalData);
+    setViewRange(null);
   }, [rawData, sellMode]);
+
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    setViewRange((prev) => {
+      const total = chartData.length;
+      if (total === 0) return prev;
+      const cur: [number, number] = prev ?? [0, total - 1];
+      const [s, en] = cur;
+      const span = en - s;
+      const delta = e.deltaY > 0 ? 1 : -1;
+      const step = Math.max(1, Math.floor(span * 0.1));
+      const newSpan = Math.min(total - 1, Math.max(10, span + delta * step));
+      const ratio = chartWrapRef.current
+        ? Math.min(1, Math.max(0, (e.clientX - chartWrapRef.current.getBoundingClientRect().left) / chartWrapRef.current.offsetWidth))
+        : 0.5;
+      const anchor = Math.round(s + span * ratio);
+      let ns = Math.round(anchor - newSpan * ratio);
+      let ne = ns + newSpan;
+      if (ns < 0) { ns = 0; ne = newSpan; }
+      if (ne >= total) { ne = total - 1; ns = ne - newSpan; }
+      ns = Math.max(0, ns);
+      return [ns, ne];
+    });
+  }, [chartData.length]);
+
+  useEffect(() => {
+    const el = chartWrapRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const total = chartData.length;
+    if (total === 0) return;
+    const cur: [number, number] = viewRange ?? [0, total - 1];
+    dragRef.current = { startX: e.clientX, startRange: cur };
+    isDragging.current = false;
+    const onMove = (me: MouseEvent) => {
+      if (!dragRef.current || !chartWrapRef.current) return;
+      const dx = me.clientX - dragRef.current.startX;
+      if (Math.abs(dx) > 3) isDragging.current = true;
+      if (!isDragging.current) return;
+      const width = chartWrapRef.current.offsetWidth - Y_AXIS_WIDTH;
+      const [s, en] = dragRef.current.startRange;
+      const span = en - s;
+      const shift = Math.round(-(dx / width) * span);
+      let ns = s + shift;
+      let ne = en + shift;
+      if (ns < 0) { ns = 0; ne = span; }
+      if (ne >= total) { ne = total - 1; ns = ne - span; }
+      ns = Math.max(0, ns);
+      setViewRange([ns, ne]);
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const handleDoubleClick = () => setViewRange(null);
 
   useEffect(() => {
     if (externalPeriod && externalPeriod !== period) {
@@ -232,7 +286,6 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     stockApi.search(query).then((res) => { setResults(res.data); setShowDropdown(true); });
   };
 
-  // code: stock_code(숫자), name: stock_name(종목명)
   const fetchAll = (code: string, name: string, p: Period) => {
     if (searchOnly) return;
     setLoading(true);
@@ -244,7 +297,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       stockApi.getCandles(code, fetchDays),
       stockApi.getRSI(code, p),
       stockApi.getMACD(code, p),
-      stockApi.getPredictions(undefined, 500, name),  // stock_name으로 조회
+      stockApi.getPredictions(undefined, 500, name),
     ])
       .then(([candleRes, rsiRes, macdRes, predRes]) => {
         const map: Record<string, any> = {};
@@ -298,7 +351,6 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           };
         }).filter((d) => d.datetime >= cutStr);
 
-        // 미래 선행스팬 패딩 (영업일 26일)
         const lastDate = trimmed.length ? trimmed[trimmed.length - 1].datetime : '';
         const futureDates: string[] = [];
         const tempD = new Date(lastDate);
@@ -321,7 +373,6 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           };
         });
 
-        // AI 신호 매핑 - cutStr 필터 제거, 차트 기간 전체 포함
         const sigMap: Record<string, string> = {};
         (predRes.data || []).forEach((pd: any) => {
           const date = (pd.predicted_at || '').slice(0, 10);
@@ -341,13 +392,15 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     if (!searchOnly) fetchAll(item.stock_code, item.stock_name, externalPeriod ?? period);
   };
 
-  const allPrices = chartData.flatMap((d) =>
-    [d.high, d.low, d.ma5, d.ma20, d.ma60, d.tenkan, d.kijun, d.spanA, d.spanB].filter((v) => v != null && !isNaN(v))
-  );
-  const pMin = allPrices.length ? Math.min(...allPrices) * 0.997 : 0;
-  const pMax = allPrices.length ? Math.max(...allPrices) * 1.003 : 100;
+  const visData = viewRange ? chartData.slice(viewRange[0], viewRange[1] + 1) : chartData;
 
-  const CandleShape = makeCandleShape(pMin, pMax);
+  const visAllPrices = visData.flatMap((d: any) =>
+    [d.high, d.low, d.ma5, d.ma20, d.ma60, d.tenkan, d.kijun, d.spanA, d.spanB].filter((v: any) => v != null && !isNaN(v))
+  );
+  const visPMin = visAllPrices.length ? Math.min(...visAllPrices) * 0.997 : 0;
+  const visPMax = visAllPrices.length ? Math.max(...visAllPrices) * 1.003 : 100;
+
+  const CandleShape = makeCandleShape(visPMin, visPMax);
 
   if (searchOnly) {
     return (
@@ -383,14 +436,19 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       {error && <div className="ex-error">{error}</div>}
 
       {!loading && chartData.length > 0 && (
-        <>
-          {/* 캔들 + 이동평균 + 일목균형표 합치기 */}
+        <div
+          ref={chartWrapRef}
+          onMouseDown={handleMouseDown}
+          onDoubleClick={handleDoubleClick}
+          style={{ cursor: 'crosshair', userSelect: 'none' }}
+        >
+          {/* 캔들 + 이동평균 + 일목균형표 */}
           <div style={{ fontSize: 10, color: '#666', marginBottom: 2 }}>캔들 + 이동평균 + 일목균형표</div>
           <ResponsiveContainer width="100%" height={heights.candle}>
-            <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
+            <ComposedChart data={visData} syncId={SYNC_ID} margin={MARGIN}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
               <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
-              <YAxis domain={[pMin, pMax]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
+              <YAxis domain={[visPMin, visPMax]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
                 tickFormatter={(v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : String(Math.round(v))} />
               <Tooltip content={<CandleTooltip />} />
               <Legend verticalAlign="top" wrapperStyle={{ fontSize: 10, paddingBottom: 2 }}
@@ -416,7 +474,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
                   </div>
                 )} />
               <Bar dataKey="close" shape={CandleShape} isAnimationActive={false} maxBarSize={20} name="캔들" legendType="none">
-                {chartData.map((d, i) => (
+                {visData.map((d, i) => (
                   <Cell key={i} fill={(d.close ?? 0) >= (d.open ?? 0) ? '#16a34a' : '#dc2626'} />
                 ))}
               </Bar>
@@ -425,7 +483,6 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
               <Line type="monotone" dataKey="ma5"    stroke="#facc15" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
               <Line type="monotone" dataKey="tenkan" stroke="#38bdf8" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
               <Line type="monotone" dataKey="kijun"  stroke="#f472b6" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
-              {/* 구름: spanA~spanB 사이 채우기 */}
               <Area type="monotone" dataKey="cloudTop"    stroke="none" fill="#4ade80" fillOpacity={0.12} connectNulls legendType="none" baseValue="dataMin" />
               <Area type="monotone" dataKey="cloudBottom" stroke="none" fill="#0a0a14" fillOpacity={1}    connectNulls legendType="none" baseValue="dataMin" />
               <Line type="monotone" dataKey="spanA"  stroke="#4ade80" dot={false} strokeWidth={0.8} connectNulls legendType="none" strokeDasharray="3 2" />
@@ -433,7 +490,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* MACD - 매수 신호 위 */}
+          {/* MACD */}
           <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span>MACD</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 14, height: 2, background: '#6366f1', display: 'inline-block' }} />MACD</span>
@@ -441,14 +498,14 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 8, height: 8, background: '#16a34a', display: 'inline-block', borderRadius: 1 }} />양/음봉</span>
           </div>
           <ResponsiveContainer width="100%" height={heights.macd}>
-            <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
+            <ComposedChart data={visData} syncId={SYNC_ID} margin={MARGIN}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
               <XAxis dataKey="datetime" tick={false} height={0} />
               <YAxis tick={false} width={Y_AXIS_WIDTH} axisLine={false} tickLine={false} />
               <Tooltip content={<MacdTooltip />} />
-              <ReferenceLine y={0} stroke="#555" strokeWidth={1} />
+              <ReferenceLine y={0} stroke="#555" strokeWidth={1} label={{ value: '0', position: 'left', fill: '#555', fontSize: 9 }} />
               <Bar dataKey="histogram" isAnimationActive={false} maxBarSize={8}>
-                {chartData.map((d, i) => (
+                {visData.map((d, i) => (
                   <Cell key={i} fill={(d.histogram ?? 0) >= 0 ? '#16a34a' : '#dc2626'} fillOpacity={0.7} />
                 ))}
               </Bar>
@@ -457,7 +514,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* RSI - 매도 신호 아래 */}
+          {/* RSI */}
           <div style={{ fontSize: 10, color: '#666', marginTop: 4, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span>RSI (14)</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 9 }}><span style={{ width: 14, height: 2, background: '#6366f1', display: 'inline-block' }} />RSI</span>
@@ -465,7 +522,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#16a34a', fontSize: 9 }}>— 30 과매도</span>
           </div>
           <ResponsiveContainer width="100%" height={heights.rsi}>
-            <ComposedChart data={chartData} syncId={SYNC_ID} margin={{ ...MARGIN, bottom: 0 }}>
+            <ComposedChart data={visData} syncId={SYNC_ID} margin={{ ...MARGIN, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
               <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH} ticks={[30, 70]} />
@@ -475,7 +532,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
               <Line type="monotone" dataKey="rsi" stroke="#6366f1" dot={false} strokeWidth={1.5} connectNulls />
             </ComposedChart>
           </ResponsiveContainer>
-        </>
+        </div>
       )}
     </div>
   );
