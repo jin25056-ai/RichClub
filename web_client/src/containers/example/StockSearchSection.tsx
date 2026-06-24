@@ -48,12 +48,13 @@ const SIGNAL_BADGE: Record<string, { label: string; color: string; bg: string }>
   매수: { label: 'BUY',  color: '#fff', bg: '#16a34a' },
   매도: { label: 'SELL', color: '#fff', bg: '#dc2626' },
 };
+const SIMPLE_SELL_BADGE = { label: 'SELL', color: '#d97706', bg: '#78350f55' };
 
 const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) => {
   const { x, y, width, height, payload } = props;
   if (!payload || payload.open == null || payload.close == null) return null;
   if (y == null || height == null || !width || height === 0) return null;
-  const { open, high, low, close, aiSignal } = payload;
+  const { open, high, low, close, aiSignal, simpleSell } = payload;
   const isUp = close >= open;
   const color = isUp ? '#16a34a' : '#dc2626';
   const domainMinPixel = y + height;
@@ -66,6 +67,7 @@ const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) =
   const bodyH   = Math.max(Math.abs(openY - closeY), 1);
   const bw = Math.max(width - 2, 2); const cx = x + width / 2;
   const badge = aiSignal && SIGNAL_BADGE[aiSignal] ? SIGNAL_BADGE[aiSignal] : null;
+  const showSimpleSell = simpleSell && !badge;
   return (
     <g>
       <line x1={cx} y1={highY} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1.5} />
@@ -73,14 +75,20 @@ const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) =
       <rect x={cx - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={color} stroke={color} strokeWidth={1} />
       {badge && aiSignal === '매도' && (
         <g>
-          <rect x={cx - 12} y={highY - 13} width={24} height={10} rx={2} fill={badge.bg} />
-          <text x={cx} y={highY - 6} textAnchor="middle" fontSize={7} fontWeight="700" fill={badge.color}>{badge.label}</text>
+          <rect x={cx - 12} y={highY - 14} width={24} height={11} rx={2} fill={badge.bg} />
+          <text x={cx} y={highY - 6} textAnchor="middle" fontSize={6} fontWeight="700" fill={badge.color}>SELL</text>
         </g>
       )}
       {badge && aiSignal === '매수' && (
         <g>
-          <rect x={cx - 12} y={lowY + 3} width={24} height={10} rx={2} fill={badge.bg} />
-          <text x={cx} y={lowY + 11} textAnchor="middle" fontSize={7} fontWeight="700" fill={badge.color}>{badge.label}</text>
+          <rect x={cx - 12} y={lowY + 3} width={24} height={11} rx={2} fill={badge.bg} />
+          <text x={cx} y={lowY + 11} textAnchor="middle" fontSize={6} fontWeight="700" fill={badge.color}>{badge.label}</text>
+        </g>
+      )}
+      {showSimpleSell && (
+        <g>
+          <rect x={cx - 12} y={highY - 14} width={24} height={11} rx={2} fill={SIMPLE_SELL_BADGE.bg} stroke="#d97706" strokeWidth={0.5} />
+          <text x={cx} y={highY - 6} textAnchor="middle" fontSize={6} fontWeight="700" fill={SIMPLE_SELL_BADGE.color}>{SIMPLE_SELL_BADGE.label}</text>
         </g>
       )}
     </g>
@@ -163,9 +171,10 @@ interface Props {
   searchOnly?: boolean;
   chartOnly?: boolean;
   period?: Period;
+  sellMode?: 'ai' | 'simple';
 }
 
-const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, searchOnly, chartOnly, period: externalPeriod }) => {
+const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, searchOnly, chartOnly, period: externalPeriod, sellMode = 'ai' }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StockItem[]>([]);
   const [selected, setSelected] = useState<StockItem | null>(null);
@@ -306,10 +315,15 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           sigMap[date] = pd.signal;
         });
 
-        const finalData = [...trimmed, ...futurePadding].map((row) => ({
-          ...row,
-          aiSignal: sigMap[row.datetime] ?? null,
-        }));
+        const finalData = [...trimmed, ...futurePadding].map((row, i, arr) => {
+          const prevMa5 = i > 0 ? arr[i - 1].ma5 : null;
+          const simpleSell = sellMode === 'simple' && row.ma5 != null && prevMa5 != null && row.ma5 < prevMa5;
+          return {
+            ...row,
+            aiSignal: sigMap[row.datetime] ?? null,
+            simpleSell,
+          };
+        });
 
         setChartData(finalData);
       })
@@ -378,7 +392,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
               <Tooltip content={<CandleTooltip />} />
               <Legend verticalAlign="top" wrapperStyle={{ fontSize: 10, paddingBottom: 2 }}
                 content={() => (
-                  <div style={{ display: 'flex', gap: 12, paddingBottom: 4, fontSize: 10, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 12, paddingBottom: 4, fontSize: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                     {[
                       { name: 'MA5', color: '#facc15' }, { name: 'MA20', color: '#fb923c' }, { name: 'MA60', color: '#a78bfa' },
                       { name: '전환선', color: '#38bdf8' }, { name: '기준선', color: '#f472b6' },
@@ -389,6 +403,13 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
                         {m.name}
                       </span>
                     ))}
+                    <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#16a34a', color: '#fff' }}>BUY</span>
+                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#dc2626', color: '#fff' }}>AI SELL</span>
+                      {sellMode === 'simple' && (
+                        <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#78350f55', color: '#d97706', border: '1px solid #d97706' }}>단순 SELL</span>
+                      )}
+                    </span>
                   </div>
                 )} />
               <Bar dataKey="close" shape={CandleShape} isAnimationActive={false} maxBarSize={20} name="캔들" legendType="none">

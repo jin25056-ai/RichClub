@@ -4,6 +4,7 @@ import { marketApi, WinRateResult, TradeRecord } from '../../api/stock';
 interface Props {
   compact?: boolean;
   stockCode?: string;
+  onTabChange?: (tab: 'ai' | 'simple') => void;
 }
 
 const fmtKRW = (n: number) => {
@@ -21,7 +22,7 @@ const inputStyle: React.CSSProperties = {
   color: '#e2e8f0', outline: 'none', width: '100%',
 };
 
-const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
+const WinRateSection: React.FC<Props> = ({ compact, stockCode, onTabChange }) => {
   const [tab, setTab] = useState<'ai' | 'simple'>('ai');
   const [period, setPeriod] = useState('3m');
   const [useCustomDate, setUseCustomDate] = useState(false);
@@ -52,6 +53,7 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
 
   const handleTab = (t: 'ai' | 'simple') => {
     setTab(t);
+    onTabChange?.(t);
     fetchData(period, stockCode, useCustomDate ? startDate : undefined, useCustomDate ? endDate : undefined, t);
   };
 
