@@ -407,10 +407,10 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
                       </span>
                     ))}
                     <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#16a34a', color: '#fff' }}>BUY</span>
-                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#dc2626', color: '#fff' }}>AI SELL</span>
+                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#16a34a', color: '#fff' }}>BUY (AI)</span>
+                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#dc2626', color: '#fff' }}>SELL (AI)</span>
                       {sellMode === 'simple' && (
-                        <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#78350f55', color: '#d97706', border: '1px solid #d97706' }}>단순 SELL</span>
+                        <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#78350f55', color: '#d97706', border: '1px solid #d97706' }}>SELL (단순)</span>
                       )}
                     </span>
                   </div>
