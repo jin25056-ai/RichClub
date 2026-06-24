@@ -1,10 +1,11 @@
 import apiClient from './client';
 
-// ── 타입 ──────────────────────────────────────────────
+// 타입
 export interface AIPredictionItem {
   stock_code: string;
   stock_name: string;
   current_price: number | null;
+  change_pct: number | null;
   signal: string;
   signal_label: number;
   confidence: number | null;
@@ -55,52 +56,80 @@ export interface GlobalMarketResponse {
   invest_reason: string;
 }
 
+export interface TradeRecord {
+  buy_date: string;
+  buy_price: number;
+  sell_date: string | null;
+  sell_price: number | null;
+  return_pct: number | null;
+  unrealized_pct: number | null;
+}
+
 export interface WinRateResult {
-  signal: string; total_signals: number;
-  win_count: number; lose_count: number; win_rate: number;
-  avg_return_pct: number; max_return_pct: number; max_loss_pct: number; hold_days: number;
+  signal: string;
+  total_signals: number;
+  win_count: number;
+  lose_count: number;
+  win_rate: number;
+  avg_return_pct: number;
+  max_return_pct: number;
+  max_loss_pct: number;
+  cumulative_return_pct: number;
+  unrealized_pct: number | null;
+  hold_days: number;
 }
 export interface WinRateResponse {
-  stock_code: string | null; stock_name: string | null;
-  period: string; results: WinRateResult[]; updated_at: string;
+  stock_code: string | null;
+  stock_name: string | null;
+  period: string;
+  results: WinRateResult[];
+  trades: TradeRecord[];
+  updated_at: string;
 }
 
 export interface StockItem { stock_code: string; stock_name: string; }
+export interface StockSearchResult { stock_code: string; stock_name: string; }
 
-// ── API 함수 ───────────────────────────────────────────
+// API 함수
 export const stockApi = {
-  // 종목 검색
   search: (q: string) =>
     apiClient.get<StockItem[]>('/api/v1/stock/search', { params: { q } }),
 
-  // AI 예측 목록
   getPredictions: (signal?: string, limit = 50, stock_name?: string) =>
     apiClient.get<AIPredictionItem[]>('/api/v1/stock/ai/predictions', {
       params: { signal, limit, stock_name },
     }),
 
-  // AI 분석 상세
+  getTodayPredictions: (signal?: string) =>
+    apiClient.get<AIPredictionItem[]>('/api/v1/stock/ai/today', {
+      params: { signal },
+    }),
+
   getAIDetail: (stock_code: string) =>
     apiClient.get<AIDetailResponse>(`/api/v1/stock/ai/detail/${stock_code}`),
 
-  // RSI
   getRSI: (stock_code: string, period = '3m') =>
     apiClient.get<RSIResponse>(`/api/v1/stock/chart/rsi/${stock_code}`, { params: { period } }),
 
-  // MACD
   getMACD: (stock_code: string, period = '3m') =>
     apiClient.get<MACDResponse>(`/api/v1/stock/chart/macd/${stock_code}`, { params: { period } }),
 
-  // 5분봉
   getCandles: (stock_code: string, days = 1) =>
     apiClient.get<CandleResponse>(`/api/v1/stock/chart/candle/${stock_code}`, { params: { days } }),
 };
 
 export const marketApi = {
-  // 글로벌 시장
   getGlobal: () => apiClient.get<GlobalMarketResponse>('/api/v1/market/global'),
 
-  // 승률 테스트
-  getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number }) =>
+  getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate', { params }),
+
+
+  getWinRateCombined: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
+    apiClient.get<WinRateResponse>('/api/v1/market/winrate/combined', { params }),
+
+  getWinRateIndicator: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
+    apiClient.get<WinRateResponse>('/api/v1/market/winrate/indicator', { params }),
+  getWinRateSimple: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
+    apiClient.get<WinRateResponse>('/api/v1/market/winrate/simple', { params }),
 };

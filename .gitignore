@@ -44,7 +44,6 @@ dataset_final*.csv
 .env
 *.env
 .kis_token.json
-collect_data/seongsu/temp.py
 
 # python
 __pycache__/
