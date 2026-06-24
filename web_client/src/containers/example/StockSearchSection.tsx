@@ -12,15 +12,14 @@ const SYNC_ID = 'stock-sync';
 const MARGIN = { left: 0, right: 10, top: 4, bottom: 0 };
 const PERIOD_EXTRA = 60;
 const ICHIMOKU_SHIFT = 26;
-const FUTURE_POINTS = 10;
 
 const getChartHeights = () => {
   const available = window.innerHeight - 56 - 20 - 20 - 60;
   return {
-    candle: Math.floor(available * 0.40),
+    candle:   Math.floor(available * 0.40),
     ichimoku: Math.floor(available * 0.22),
-    rsi: Math.floor(available * 0.18),
-    macd: Math.floor(available * 0.20),
+    rsi:      Math.floor(available * 0.18),
+    macd:     Math.floor(available * 0.20),
   };
 };
 
@@ -32,27 +31,21 @@ const calcMA = (data: any[], n: number): (number | null)[] =>
     return Math.round(vals.reduce((s, v) => s + v, 0) / n);
   });
 
-const addDays = (dateStr: string, n: number): string => {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
-};
-
 const calcIchimoku = (data: any[]) => {
   const hi = (i: number, n: number) =>
     Math.max(...data.slice(Math.max(0, i - n + 1), i + 1).map((d) => d.high ?? -Infinity));
   const lo = (i: number, n: number) =>
     Math.min(...data.slice(Math.max(0, i - n + 1), i + 1).map((d) => d.low ?? Infinity));
   return data.map((_, i) => ({
-    tenkan: i >= 8 ? Math.round((hi(i, 9) + lo(i, 9)) / 2) : null,
-    kijun: i >= 25 ? Math.round((hi(i, 26) + lo(i, 26)) / 2) : null,
-    spanA: i >= 8 && i >= 25 ? Math.round(((hi(i, 9) + lo(i, 9)) / 2 + (hi(i, 26) + lo(i, 26)) / 2) / 2) : null,
-    spanB: i >= 51 ? Math.round((hi(i, 52) + lo(i, 52)) / 2) : null,
+    tenkan: i >= 8  ? Math.round((hi(i, 9)  + lo(i, 9))  / 2) : null,
+    kijun:  i >= 25 ? Math.round((hi(i, 26) + lo(i, 26)) / 2) : null,
+    spanA:  i >= 8 && i >= 25 ? Math.round(((hi(i, 9) + lo(i, 9)) / 2 + (hi(i, 26) + lo(i, 26)) / 2) / 2) : null,
+    spanB:  i >= 51 ? Math.round((hi(i, 52) + lo(i, 52)) / 2) : null,
   }));
 };
 
 const SIGNAL_BADGE: Record<string, { label: string; color: string; bg: string }> = {
-  매수: { label: 'BUY', color: '#fff', bg: '#16a34a' },
+  매수: { label: 'BUY',  color: '#fff', bg: '#16a34a' },
   매도: { label: 'SELL', color: '#fff', bg: '#dc2626' },
 };
 
@@ -68,27 +61,23 @@ const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) =
   const toY = (v: number) => domainMinPixel - (v - domainMin) * pixelPerUnit;
   const openY = toY(open); const closeY = toY(close);
   const highY = toY(high ?? Math.max(open, close));
-  const lowY = toY(low ?? Math.min(open, close));
+  const lowY  = toY(low  ?? Math.min(open, close));
   const bodyTop = Math.min(openY, closeY);
-  const bodyH = Math.max(Math.abs(openY - closeY), 1);
+  const bodyH   = Math.max(Math.abs(openY - closeY), 1);
   const bw = Math.max(width - 2, 2); const cx = x + width / 2;
-
   const badge = aiSignal && SIGNAL_BADGE[aiSignal] ? SIGNAL_BADGE[aiSignal] : null;
-
   return (
     <g>
       <line x1={cx} y1={highY} x2={cx} y2={bodyTop} stroke={color} strokeWidth={1.5} />
       <line x1={cx} y1={bodyTop + bodyH} x2={cx} y2={lowY} stroke={color} strokeWidth={1.5} />
       <rect x={cx - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={color} stroke={color} strokeWidth={1} />
       {badge && aiSignal === '매도' && (
-        // SELL: 고가 위에 표시
         <g>
           <rect x={cx - 12} y={highY - 13} width={24} height={10} rx={2} fill={badge.bg} />
           <text x={cx} y={highY - 6} textAnchor="middle" fontSize={7} fontWeight="700" fill={badge.color}>{badge.label}</text>
         </g>
       )}
       {badge && aiSignal === '매수' && (
-        // BUY: 저가 아래에 표시
         <g>
           <rect x={cx - 12} y={lowY + 3} width={24} height={10} rx={2} fill={badge.bg} />
           <text x={cx} y={lowY + 11} textAnchor="middle" fontSize={7} fontWeight="700" fill={badge.color}>{badge.label}</text>
@@ -99,14 +88,12 @@ const makeCandleShape = (domainMin: number, domainMax: number) => (props: any) =
 };
 
 const TIP = { background: '#12121f', border: '1px solid #2d2d3d', borderRadius: 6, padding: '7px 10px', fontSize: 11, minWidth: 140 };
-
 const tipRow = (lbl: string, val: any, color = '#e2e8f0') => val != null ? (
   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
     <span style={{ color: '#777' }}>{lbl}</span>
     <span style={{ color, fontWeight: 500 }}>{val}</span>
   </div>
 ) : null;
-
 const fmt = (v: any) => v != null ? Math.round(v).toLocaleString() : null;
 
 const CandleTooltip = ({ active, payload, label }: any) => {
@@ -121,7 +108,7 @@ const CandleTooltip = ({ active, payload, label }: any) => {
       {tipRow('저가', fmt(d.low), '#dc2626')}
       {tipRow('종가', fmt(d.close))}
       {d.ma5 != null && <div style={{ marginTop: 4 }}>
-        {tipRow('MA5', fmt(d.ma5), '#facc15')}
+        {tipRow('MA5',  fmt(d.ma5),  '#facc15')}
         {tipRow('MA20', fmt(d.ma20), '#fb923c')}
         {d.ma60 != null && tipRow('MA60', fmt(d.ma60), '#a78bfa')}
       </div>}
@@ -137,9 +124,9 @@ const IchimokuTooltip = ({ active, payload, label }: any) => {
     <div style={TIP}>
       <div style={{ color: '#6366f1', marginBottom: 4, fontWeight: 600 }}>{label}</div>
       {tipRow('전환선', fmt(d.tenkan), '#38bdf8')}
-      {tipRow('기준선', fmt(d.kijun), '#f472b6')}
-      {tipRow('선행A', fmt(d.spanA), '#4ade80')}
-      {tipRow('선행B', fmt(d.spanB), '#f87171')}
+      {tipRow('기준선', fmt(d.kijun),  '#f472b6')}
+      {tipRow('선행A',  fmt(d.spanA),  '#4ade80')}
+      {tipRow('선행B',  fmt(d.spanB),  '#f87171')}
     </div>
   );
 };
@@ -163,9 +150,9 @@ const MacdTooltip = ({ active, payload, label }: any) => {
   return (
     <div style={TIP}>
       <div style={{ color: '#6366f1', marginBottom: 4, fontWeight: 600 }}>{label}</div>
-      {tipRow('MACD', fmt(d.macd), '#6366f1')}
-      {tipRow('시그널', fmt(d.macdSignal), '#f59e0b')}
-      {tipRow('히스토그램', fmt(d.histogram), (d.histogram ?? 0) >= 0 ? '#16a34a' : '#dc2626')}
+      {tipRow('MACD',      fmt(d.macd),      '#6366f1')}
+      {tipRow('시그널',    fmt(d.macdSignal), '#f59e0b')}
+      {tipRow('히스토그램', fmt(d.histogram),  (d.histogram ?? 0) >= 0 ? '#16a34a' : '#dc2626')}
     </div>
   );
 };
@@ -184,7 +171,6 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
   const [selected, setSelected] = useState<StockItem | null>(null);
   const [period, setPeriod] = useState<Period>('3m');
   const [chartData, setChartData] = useState<any[]>([]);
-  const [signals, setSignals] = useState<{ date: string; signal: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
@@ -199,7 +185,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
   useEffect(() => {
     if (externalPeriod && externalPeriod !== period) {
       setPeriod(externalPeriod);
-      if (selected) fetchAll(selected.stock_code, externalPeriod);
+      if (selected) fetchAll(selected.stock_code, selected.stock_name, externalPeriod);
     }
   }, [externalPeriod]);
 
@@ -208,13 +194,13 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       const p = externalPeriod ?? period;
       if (chartOnly) {
         setSelected({ stock_code: initialStock.code, stock_name: initialStock.name });
-        fetchAll(initialStock.code, p);
+        fetchAll(initialStock.code, initialStock.name, p);
       } else if (!chartOnly && !searchOnly) {
         setQuery(initialStock.name);
         setSelected({ stock_code: initialStock.code, stock_name: initialStock.name });
         setResults([]);
         setShowDropdown(false);
-        fetchAll(initialStock.code, p);
+        fetchAll(initialStock.code, initialStock.name, p);
       }
     }
   }, [initialStock?.code]);
@@ -224,7 +210,8 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     stockApi.search(query).then((res) => { setResults(res.data); setShowDropdown(true); });
   };
 
-  const fetchAll = (code: string, p: Period) => {
+  // code: stock_code(숫자), name: stock_name(종목명)
+  const fetchAll = (code: string, name: string, p: Period) => {
     if (searchOnly) return;
     setLoading(true);
     setError('');
@@ -235,7 +222,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       stockApi.getCandles(code, fetchDays),
       stockApi.getRSI(code, p),
       stockApi.getMACD(code, p),
-      stockApi.getPredictions(undefined, 300, code),
+      stockApi.getPredictions(undefined, 300, name),  // stock_name으로 조회
     ])
       .then(([candleRes, rsiRes, macdRes, predRes]) => {
         const map: Record<string, any> = {};
@@ -243,9 +230,9 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           const key = d.datetime.slice(0, 10);
           map[key] = {
             ...d, datetime: key,
-            open: d.open != null ? Math.round(d.open) : null,
-            high: d.high != null ? Math.round(d.high) : null,
-            low: d.low != null ? Math.round(d.low) : null,
+            open:  d.open  != null ? Math.round(d.open)  : null,
+            high:  d.high  != null ? Math.round(d.high)  : null,
+            low:   d.low   != null ? Math.round(d.low)   : null,
             close: d.close != null ? Math.round(d.close) : null,
           };
         });
@@ -279,13 +266,13 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             ...d,
             ma5: ma5arr[i], ma20: ma20arr[i], ma60: ma60arr[i],
             tenkan: ichimokuRaw[i].tenkan,
-            kijun: ichimokuRaw[i].kijun,
+            kijun:  ichimokuRaw[i].kijun,
             spanA: shiftedIdx >= 0 ? ichimokuRaw[shiftedIdx].spanA : null,
             spanB: shiftedIdx >= 0 ? ichimokuRaw[shiftedIdx].spanB : null,
           };
         }).filter((d) => d.datetime >= cutStr);
 
-        // 미래 선행스팬 패딩 (일목균형표용, 영업일 26일)
+        // 미래 선행스팬 패딩 (영업일 26일)
         const lastDate = trimmed.length ? trimmed[trimmed.length - 1].datetime : '';
         const futureDates: string[] = [];
         const tempD = new Date(lastDate);
@@ -300,7 +287,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           return { datetime: futureDate, spanA: ichi?.spanA ?? null, spanB: ichi?.spanB ?? null };
         });
 
-        // AI 신호를 chartData에 직접 합치기
+        // AI 신호 매핑 (stock_name 기준으로 가져왔으므로 날짜만 매핑)
         const sigMap: Record<string, string> = {};
         (predRes.data || []).forEach((pd: any) => {
           const date = (pd.predicted_at || '').slice(0, 10);
@@ -313,7 +300,6 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
         }));
 
         setChartData(finalData);
-        setSignals([]);
       })
       .catch(() => setError('데이터를 불러오지 못했습니다.'))
       .finally(() => setLoading(false));
@@ -323,7 +309,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     setSelected(item); setResults([]); setShowDropdown(false);
     setQuery(item.stock_name);
     onStockChange?.(item.stock_code, item.stock_name);
-    if (!searchOnly) fetchAll(item.stock_code, externalPeriod ?? period);
+    if (!searchOnly) fetchAll(item.stock_code, item.stock_name, externalPeriod ?? period);
   };
 
   const candlePrices = chartData.flatMap((d) =>
@@ -401,7 +387,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
               </Bar>
               <Line type="monotone" dataKey="ma60" stroke="#a78bfa" dot={false} strokeWidth={1.5} connectNulls legendType="none" />
               <Line type="monotone" dataKey="ma20" stroke="#fb923c" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
-              <Line type="monotone" dataKey="ma5" stroke="#facc15" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
+              <Line type="monotone" dataKey="ma5"  stroke="#facc15" dot={false} strokeWidth={1.2} connectNulls legendType="none" />
             </ComposedChart>
           </ResponsiveContainer>
 
@@ -416,9 +402,9 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
               <Legend verticalAlign="top" wrapperStyle={{ fontSize: 10, paddingBottom: 2 }}
                 formatter={(v) => <span style={{ color: '#aaa' }}>{v}</span>} />
               <Line type="monotone" dataKey="tenkan" stroke="#38bdf8" dot={false} strokeWidth={1.5} connectNulls name="전환선" />
-              <Line type="monotone" dataKey="kijun" stroke="#f472b6" dot={false} strokeWidth={1.5} connectNulls name="기준선" />
-              <Line type="monotone" dataKey="spanA" stroke="#4ade80" dot={false} strokeWidth={1} connectNulls name="선행A" strokeDasharray="3 2" />
-              <Line type="monotone" dataKey="spanB" stroke="#f87171" dot={false} strokeWidth={1} connectNulls name="선행B" strokeDasharray="3 2" />
+              <Line type="monotone" dataKey="kijun"  stroke="#f472b6" dot={false} strokeWidth={1.5} connectNulls name="기준선" />
+              <Line type="monotone" dataKey="spanA"  stroke="#4ade80" dot={false} strokeWidth={1}   connectNulls name="선행A" strokeDasharray="3 2" />
+              <Line type="monotone" dataKey="spanB"  stroke="#f87171" dot={false} strokeWidth={1}   connectNulls name="선행B" strokeDasharray="3 2" />
             </ComposedChart>
           </ResponsiveContainer>
 
@@ -448,7 +434,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
                   <Cell key={i} fill={(d.histogram ?? 0) >= 0 ? '#16a34a' : '#dc2626'} fillOpacity={0.7} />
                 ))}
               </Bar>
-              <Line type="monotone" dataKey="macd" stroke="#6366f1" dot={false} strokeWidth={1.5} connectNulls />
+              <Line type="monotone" dataKey="macd"       stroke="#6366f1" dot={false} strokeWidth={1.5} connectNulls />
               <Line type="monotone" dataKey="macdSignal" stroke="#f59e0b" dot={false} strokeWidth={1.5} connectNulls />
             </ComposedChart>
           </ResponsiveContainer>
