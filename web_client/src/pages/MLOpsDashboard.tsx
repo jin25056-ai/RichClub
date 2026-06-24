@@ -91,6 +91,7 @@ const MLOpsDashboard: React.FC = () => {
   const [history, setHistory] = useState<TrainHistory[]>([]);
   const [stocks, setStocks] = useState<StockPerf[]>([]);
   const [stockDays, setStockDays] = useState(90);
+  const [statsDays, setStatsDays] = useState(90);
   const [recentDays, setRecentDays] = useState(7);
   const [signalFilter, setSignalFilter] = useState('');
   const [loading, setLoading] = useState(false);
