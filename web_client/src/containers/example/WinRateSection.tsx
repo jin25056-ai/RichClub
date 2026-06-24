@@ -132,8 +132,6 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode }) => {
         </div>
       </div>
 
-      {loading && <div style={{ fontSize: 9, color: '#444', marginBottom: 4 }}>불러오는 중...</div>}
-
       <div style={{ opacity: loading ? 0.4 : 1, transition: 'opacity 0.15s' }}>
       {completedTrades.length === 0 && openTrades.length === 0 && (
         <div style={{ fontSize: 10, color: '#555', textAlign: 'center', padding: '16px 0' }}>
