@@ -8,6 +8,7 @@ import { stockApi, StockItem } from '../../api/stock';
 type Period = '1m' | '3m' | '6m';
 
 const Y_AXIS_WIDTH = 58;
+const Y_AXIS_WIDTH_SMALL = 10; // MACD용 숫자 없는 축
 const SYNC_ID = 'stock-sync';
 const MARGIN = { left: 0, right: 10, top: 4, bottom: 0 };
 const PERIOD_EXTRA = 60;
@@ -405,7 +406,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
             <ComposedChart data={chartData} syncId={SYNC_ID} margin={MARGIN}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
               <XAxis dataKey="datetime" tick={false} height={0} />
-              <YAxis tick={false} width={10} />
+              <YAxis tick={false} width={Y_AXIS_WIDTH} axisLine={false} tickLine={false} />
               <Tooltip content={<MacdTooltip />} />
               <ReferenceLine y={0} stroke="#555" strokeWidth={1} />
               <Bar dataKey="histogram" isAnimationActive={false} maxBarSize={8}>
