@@ -46,6 +46,11 @@ const ExamplePage: React.FC = () => {
         {currentName && (
           <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, marginLeft: 4 }}>
             — {currentName}
+            {selectedStock?.code && (
+              <span style={{ fontSize: 10, color: '#4b5563', fontWeight: 400, marginLeft: 4 }}>
+                {selectedStock.code}
+              </span>
+            )}
           </span>
         )}
       </div>
@@ -63,7 +68,12 @@ const ExamplePage: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: '#666' }}>승률 테스트</span>
               {currentName && (
-                <span style={{ fontSize: 9, color: '#6366f1' }}>— {currentName}</span>
+                <span style={{ fontSize: 9, color: '#6366f1' }}>
+                  — {currentName}
+                  {selectedStock?.code && (
+                    <span style={{ color: '#4b5563', marginLeft: 3 }}>{selectedStock.code}</span>
+                  )}
+                </span>
               )}
             </div>
             <WinRateSection compact stockCode={selectedStock?.code} />
