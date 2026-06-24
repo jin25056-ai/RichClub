@@ -35,7 +35,7 @@ const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) 
 
   const fetchPredictions = (signal: SignalFilter) => {
     setLoading(true);
-    stockApi.getTodayPredictions(signal || undefined)
+    stockApi.getPredictions(signal || undefined, 100)
       .then((res) => setItems(res.data))
       .finally(() => setLoading(false));
   };
