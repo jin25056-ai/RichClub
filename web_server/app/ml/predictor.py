@@ -1,26 +1,21 @@
 """
 app/ml/predictor.py
 
-저장된 XGBoost 모델로 예측 + 성능 기록
-- 예측 결과를 total_trading_signals에 upsert
-- 실제 결과(N일 후 수익률)는 나중에 평가하여 model_predictions에 업데이트
+1. run_daily_prediction: 매일 장 마감 후 XGBoost 예측 → total_trading_signals upsert
+2. calculate_returns: total_trading_signals 내에서 +1/5/20/60일 수익률 계산 후 업데이트
+3. aggregate_monthly_performance: 월별 성능 집계 → model_performance_monthly 저장
+4. check_and_retrain: 성능 나쁜 월 이후 자동 재학습
 """
 import logging
-import os
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
-import numpy as np
 import pandas as pd
-import yfinance as yf
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import ASCENDING
+from pymongo import ASCENDING, UpdateOne
 
-from app.ml.trainer import FEATURE_COLS, LABEL_MAP, MODEL_PATH, KOSPI_STOCKS, _fetch_market_data, _build_features
+from app.ml.trainer import FEATURE_COLS, LABEL_MAP, KOSPI_STOCKS, _fetch_market_data, _build_features
 
 logger = logging.getLogger(__name__)
-
-HOLD_DAYS = 5  # 예측 평가 기준: N일 후 수익률
 
 
 def _safe(v):
@@ -32,13 +27,14 @@ def _safe(v):
 
 
 async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None):
-    """매일 장 마감 후 전 종목 예측 + DB 저장"""
-    from app.ml.trainer import load_model
+    """매일 장 마감 후 전 종목 XGBoost 예측 → total_trading_signals upsert"""
     import asyncio
+    import yfinance as yf
+    from app.ml.trainer import load_model
 
     model = load_model()
     if model is None:
-        logger.warning("모델 없음. 학습 먼저 실행 필요")
+        logger.warning("모델 없음. 학습 시작")
         from app.ml.trainer import train_model
         await train_model(db, triggered_by="auto_init")
         model = load_model()
@@ -46,10 +42,8 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
     today = target_date or datetime.now().strftime('%Y-%m-%d')
     logger.info(f"[predictor] 예측 시작: {today}")
 
-    col_signals = db.total_trading_signals
-    col_preds = db.model_predictions
-    await col_signals.create_index([("stock_name", ASCENDING), ("predicted_at", ASCENDING)])
-    await col_preds.create_index([("stock_name", ASCENDING), ("predicted_at", ASCENDING)])
+    col = db.total_trading_signals
+    await col.create_index([("stock_name", ASCENDING), ("predicted_at", ASCENDING)])
 
     buf_start = (datetime.strptime(today, '%Y-%m-%d') - timedelta(days=120)).strftime('%Y-%m-%d')
     end_dt = (datetime.strptime(today, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
@@ -78,13 +72,11 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
 
                 pred_label = int(model.predict(pd.DataFrame([feat]))[0])
                 signal = LABEL_MAP.get(pred_label, '관망')
-                predicted_at = datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
-                close_price = _safe(row.get('close'))
+                predicted_at = datetime(dt.year, dt.month, dt.day)
 
-                # total_trading_signals upsert
                 doc = {
                     'stock_code': code, 'stock_name': name,
-                    'close': close_price, 'open': _safe(row.get('open')),
+                    'close': _safe(row.get('close')), 'open': _safe(row.get('open')),
                     'high': _safe(row.get('high')), 'low': _safe(row.get('low')),
                     'volume': _safe(row.get('volume')),
                     'signal': signal, 'signal_label': pred_label,
@@ -95,129 +87,180 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
                     'ma20_60_ratio': _safe(row.get('ma20_60_ratio')),
                     'close_ma60_ratio': _safe(row.get('close_ma60_ratio')),
                     'vix_value': _safe(row.get('vix_value')),
-                    'confidence': None, 'conditions_met': [], 'conditions_not_met': [],
-                    'feature_importance': [],
                     'predicted_at': predicted_at,
-                    'uploaded_at': datetime.now(timezone.utc),
+                    'uploaded_at': datetime.utcnow(),
+                    # 수익률 필드 (나중에 calculate_returns가 채움)
+                    'ret_1d': None, 'ret_5d': None, 'ret_20d': None, 'ret_60d': None,
+                    'is_correct_5d': None,
                 }
-                await col_signals.update_one(
+                await col.update_one(
                     {'stock_name': name, 'predicted_at': predicted_at},
                     {'$set': doc}, upsert=True
-                )
-
-                # model_predictions: 성능 평가용 별도 저장
-                # actual_return_pct는 N일 후 evaluate_predictions()에서 채움
-                pred_doc = {
-                    'stock_code': code, 'stock_name': name,
-                    'signal': signal, 'signal_label': pred_label,
-                    'close_at_prediction': close_price,
-                    'predicted_at': predicted_at,
-                    'evaluate_at': datetime(
-                        (datetime.strptime(today, '%Y-%m-%d') + timedelta(days=HOLD_DAYS)).year,
-                        (datetime.strptime(today, '%Y-%m-%d') + timedelta(days=HOLD_DAYS)).month,
-                        (datetime.strptime(today, '%Y-%m-%d') + timedelta(days=HOLD_DAYS)).day,
-                        tzinfo=timezone.utc
-                    ),
-                    'actual_return_pct': None,   # 나중에 채움
-                    'is_correct': None,           # 나중에 채움
-                    'evaluated': False,
-                }
-                await col_preds.update_one(
-                    {'stock_name': name, 'predicted_at': predicted_at},
-                    {'$set': pred_doc}, upsert=True
                 )
                 total += 1
 
         except Exception as e:
             logger.error(f"{name} 예측 실패: {e}")
 
-    logger.info(f"[predictor] 완료: {total}건 저장 ({today})")
+    logger.info(f"[predictor] 완료: {total}건 ({today})")
+
+    # 예측 후 수익률 계산 실행
+    await calculate_returns(db)
 
 
-async def evaluate_predictions(db: AsyncIOMotorDatabase):
+async def calculate_returns(db: AsyncIOMotorDatabase):
     """
-    evaluate_at 날짜가 지난 미평가 예측건에 대해 실제 수익률 계산
-    - 매수: N일 후 종가가 올랐으면 correct
-    - 매도: N일 후 종가가 내렸으면 correct
-    - 관망: 변동 없으면 correct (±1% 이내)
+    total_trading_signals 내에서 종목별로
+    +1일/+5일/+20일/+60일 후 close를 같은 컬렉션에서 찾아서 수익률 업데이트
+    수익률이 없는 것들만 처리 (매일 돌려도 안전)
     """
-    import asyncio
-    now = datetime.now(timezone.utc)
-    now_naive = datetime.utcnow()
-    col = db.model_predictions
+    col = db.total_trading_signals
 
-    # evaluate_at이 naive/aware 혼재할 수 있으므로 둘 다 커버
+    # ret_5d가 없고 predicted_at이 충분히 과거인 것들 처리 (5일 이상 지난 것)
+    cutoff = datetime.utcnow() - timedelta(days=5)
     cursor = col.find({
-        'evaluated': False,
-        '$or': [
-            {'evaluate_at': {'$lte': now}},
-            {'evaluate_at': {'$lte': now_naive}},
-        ],
-        'close_at_prediction': {'$ne': None}
-    }).limit(200)
+        'ret_5d': None,
+        'close': {'$ne': None},
+        'predicted_at': {'$lte': cutoff}
+    }).limit(1000)
     docs = [doc async for doc in cursor]
+
     if not docs:
+        logger.info("[returns] 계산할 데이터 없음")
         return
 
-    logger.info(f"[evaluator] 평가 대상: {len(docs)}건")
-    updated = 0
+    logger.info(f"[returns] 수익률 계산 대상: {len(docs)}건")
+    bulk_ops = []
 
-    # 종목+날짜 단위로 묶어서 yfinance 호출 최소화
-    from collections import defaultdict
-    groups = defaultdict(list)
     for doc in docs:
-        code = doc.get('stock_code', '')
-        if not code or not code.isdigit():
-            sig = await db.total_trading_signals.find_one({'stock_name': doc.get('stock_name', '')}, {'stock_code': 1})
-            code = sig.get('stock_code', '') if sig else ''
-        if not code:
+        name = doc.get('stock_name')
+        base_close = doc.get('close')
+        predicted_at = doc.get('predicted_at')
+        signal = doc.get('signal', '관망')
+
+        if not base_close or not predicted_at:
             continue
-        eval_str = doc['evaluate_at'].strftime('%Y-%m-%d')
-        groups[(code, eval_str)].append(doc)
 
-    for (code, eval_str), group_docs in groups.items():
-        ticker = code + '.KS'
-        end_str = (datetime.strptime(eval_str, '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
-        try:
-            raw = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda t=ticker, s=eval_str, e=end_str: yf.download(
-                    t, start=s, end=e, interval='1d', progress=False, auto_adjust=True
-                )
+        # predicted_at을 naive datetime으로 통일
+        if hasattr(predicted_at, 'tzinfo') and predicted_at.tzinfo:
+            predicted_at = predicted_at.replace(tzinfo=None)
+
+        ret = {}
+        for days, key in [(1, 'ret_1d'), (5, 'ret_5d'), (20, 'ret_20d'), (60, 'ret_60d')]:
+            target_dt = predicted_at + timedelta(days=days)
+            # target_dt 이후 가장 가까운 거래일 데이터 조회 (최대 7일 이내)
+            future = await col.find_one(
+                {
+                    'stock_name': name,
+                    'predicted_at': {'$gte': target_dt, '$lte': target_dt + timedelta(days=7)},
+                    'close': {'$ne': None}
+                },
+                sort=[('predicted_at', 1)],
+                projection={'close': 1}
             )
-            if raw.empty:
-                continue
-            # yfinance 버전에 따라 MultiIndex 처리
-            if isinstance(raw.columns, pd.MultiIndex):
-                raw = raw.xs(ticker, axis=1, level=1) if ticker in raw.columns.get_level_values(1) else raw.droplevel(1, axis=1)
-            raw.columns = [c.lower() for c in raw.columns]
-            if 'close' not in raw.columns:
-                logger.warning(f"{ticker} close 컬럼 없음: {list(raw.columns)}")
-                continue
-            future_close = float(raw['close'].dropna().iloc[0])
+            if future and future.get('close'):
+                ret[key] = round((float(future['close']) - float(base_close)) / float(base_close) * 100, 2)
+            else:
+                ret[key] = None
 
-            for doc in group_docs:
-                close_at_pred = doc['close_at_prediction']
-                signal = doc['signal']
-                ret_pct = round((future_close - close_at_pred) / close_at_pred * 100, 2)
-                if signal == '매수':
-                    is_correct = ret_pct > 0
-                elif signal == '매도':
-                    is_correct = ret_pct < 0
-                else:
-                    is_correct = abs(ret_pct) <= 1.0
-                await col.update_one(
-                    {'_id': doc['_id']},
-                    {'$set': {
-                        'actual_return_pct': ret_pct,
-                        'future_close': future_close,
-                        'is_correct': is_correct,
-                        'evaluated': True,
-                        'evaluated_at': now,
-                    }}
-                )
-                updated += 1
-        except Exception as e:
-            logger.warning(f"{ticker} 평가 실패: {e}")
+        # 5일 수익률 기준 신호 적중 여부
+        if ret.get('ret_5d') is not None:
+            r = ret['ret_5d']
+            if signal == '매수':
+                is_correct = r > 0
+            elif signal == '매도':
+                is_correct = r < 0
+            else:
+                is_correct = abs(r) <= 1.0
+            ret['is_correct_5d'] = is_correct
 
-    logger.info(f"[evaluator] 평가 완료: {updated}건")
+        bulk_ops.append(UpdateOne({'_id': doc['_id']}, {'$set': ret}))
+
+    if bulk_ops:
+        result = await col.bulk_write(bulk_ops, ordered=False)
+        logger.info(f"[returns] 수익률 업데이트: {result.modified_count}건")
+
+
+async def aggregate_monthly_performance(db: AsyncIOMotorDatabase):
+    """
+    total_trading_signals에서 월별 성능 집계 → model_performance_monthly 저장
+    매월 1일 자동 실행
+    """
+    pipeline = [
+        {'$match': {'ret_5d': {'$ne': None}, 'is_correct_5d': {'$ne': None}}},
+        {'$group': {
+            '_id': {
+                'year': {'$year': '$predicted_at'},
+                'month': {'$month': '$predicted_at'},
+                'signal': '$signal',
+            },
+            'total': {'$sum': 1},
+            'correct': {'$sum': {'$cond': ['$is_correct_5d', 1, 0]}},
+            'avg_ret_5d': {'$avg': '$ret_5d'},
+            'avg_ret_1d': {'$avg': '$ret_1d'},
+            'avg_ret_20d': {'$avg': '$ret_20d'},
+        }},
+        {'$sort': {'_id.year': 1, '_id.month': 1, '_id.signal': 1}},
+    ]
+    col_monthly = db.model_performance_monthly
+    results = [doc async for doc in db.total_trading_signals.aggregate(pipeline)]
+
+    if not results:
+        return
+
+    bulk_ops = []
+    for r in results:
+        ym = r['_id']
+        month_str = f"{ym['year']}-{ym['month']:02d}"
+        total = r['total']
+        correct = r['correct']
+        bulk_ops.append(UpdateOne(
+            {'month': month_str, 'signal': ym['signal']},
+            {'$set': {
+                'month': month_str,
+                'year': ym['year'],
+                'month_num': ym['month'],
+                'signal': ym['signal'],
+                'total': total,
+                'correct': correct,
+                'accuracy': round(correct / total * 100, 1) if total > 0 else 0,
+                'avg_ret_5d': round(r.get('avg_ret_5d') or 0, 2),
+                'avg_ret_1d': round(r.get('avg_ret_1d') or 0, 2),
+                'avg_ret_20d': round(r.get('avg_ret_20d') or 0, 2),
+                'updated_at': datetime.utcnow(),
+            }},
+            upsert=True
+        ))
+
+    await col_monthly.bulk_write(bulk_ops, ordered=False)
+    logger.info(f"[monthly] 월별 성능 집계 완료: {len(results)}건")
+
+
+async def check_and_retrain(db: AsyncIOMotorDatabase):
+    """
+    최근 2개월 매수 신호 정확도가 50% 미만이면 자동 재학습
+    """
+    two_months_ago = datetime.utcnow() - timedelta(days=60)
+    pipeline = [
+        {'$match': {
+            'signal': '매수',
+            'is_correct_5d': {'$ne': None},
+            'predicted_at': {'$gte': two_months_ago}
+        }},
+        {'$group': {
+            '_id': None,
+            'total': {'$sum': 1},
+            'correct': {'$sum': {'$cond': ['$is_correct_5d', 1, 0]}},
+        }},
+    ]
+    results = [doc async for doc in db.total_trading_signals.aggregate(pipeline)]
+    if not results or results[0]['total'] < 30:
+        return
+
+    acc = results[0]['correct'] / results[0]['total']
+    logger.info(f"[check_retrain] 최근 2개월 매수 정확도: {acc:.1%} ({results[0]['correct']}/{results[0]['total']})")
+
+    if acc < 0.50:
+        logger.warning("[check_retrain] 정확도 50% 미만 → 자동 재학습")
+        from app.ml.trainer import train_model
+        await train_model(db, triggered_by="auto_drift")

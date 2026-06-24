@@ -8,6 +8,7 @@
 RichClub/
   web_server/      # FastAPI 백엔드
   web_client/      # React + TypeScript 프론트엔드
+  collect_data/    # 데이터 수집 스크립트 (seongsu, jungho 등 팀원별)
   docker-compose.yml
 ```
 
@@ -58,6 +59,91 @@ Authorization: Bearer <access_token>
   "updated_at": "datetime (UTC)"
 }
 ```
+
+---
+
+## MongoDB 컬렉션
+
+| 컬렉션 | 설명 |
+|---|---|
+| users | 회원 정보 |
+| total_trading_signals | 종목별 일별 예측 신호 + 수익률 (ret_1d, ret_5d, ret_20d, ret_60d) |
+| model_train_history | XGBoost 모델 학습 이력 |
+| model_performance_monthly | 월별 신호 성능 집계 (매수/매도/관망 승률, 평균 수익률) |
+| candles_5m | 5분봉 데이터 |
+
+---
+
+## MLOps 파이프라인
+
+서버 내부에서 자체적으로 학습, 예측, 평가까지 수행합니다. `collect_data/jungho` 폴더의 스크립트에 의존하지 않습니다.
+
+### 흐름
+
+```
+서버 최초 실행
+    ↓
+XGBoost 모델 자동 학습 (yfinance로 KOSPI 50종목 2년치 수집)
+    ↓ /app/models/xgb_model.json 저장
+매일 KST 16:30 (UTC 07:30)
+    ↓
+전 종목 예측 → total_trading_signals upsert
+    ↓
+매일 UTC 08:00
+    ↓
+수익률 계산 (total_trading_signals 내에서 +1/5/20/60일 후 종가 비교)
+    ↓
+월별 성능 집계 → model_performance_monthly 저장
+    ↓
+매주 수요일 성능 체크
+    ↓
+매수 신호 2개월 정확도 50% 미만이면 자동 재학습
+    ↓
+매주 일요일 정기 재학습
+```
+
+### XGBoost 모델 피처
+| 피처 | 설명 |
+|---|---|
+| ma5_20_ratio | 5일선 / 20일선 비율 |
+| ma20_60_ratio | 20일선 / 60일선 비율 |
+| close_ma60_ratio | 종가 / 60일선 비율 |
+| vol_change | 거래량 전일 대비 변화율 |
+| macd | MACD 값 |
+| stoch_k / stoch_d | 스토캐스틱 K/D |
+| obv | OBV |
+| macd_change | MACD 전일 대비 변화 |
+| stoch_k_change | 스토캐스틱 K 전일 대비 변화 |
+| sp500_ma_ratio | S&P500 / 20일선 비율 (거시 지표) |
+| vix_value | VIX 지수 (공포 지수) |
+
+### 신호 레이블
+| 값 | 의미 |
+|---|---|
+| 0 | 매도 |
+| 1 | 매수 |
+| 2 | 관망 |
+
+### 스케줄러 (UTC 기준)
+| 스케줄 | 설명 |
+|---|---|
+| 월~금 매 5분 | 5분봉 수집 |
+| 월~금 07:30 | 전 종목 예측 |
+| 매일 08:00 | 수익률 계산 + 월별 집계 |
+| 매주 수요일 09:00 | 성능 체크 후 필요시 자동 재학습 |
+| 매주 일요일 23:00 | 정기 모델 재학습 |
+
+---
+
+## MLOps 대시보드
+
+관리자용 대시보드: `https://richclub.efforthye.dev/mlops` (로그인 필요)
+
+- 모델 현황 (모델 존재 여부, 마지막 정확도, 수익률 계산 진행 상황)
+- 기간별 신호 성능 (30/60/90/180일, 매수/매도/관망 승률 및 평균 수익률)
+- 월별 성능 테이블 (월별 승률 + 5일 평균 수익률)
+- 학습 이력
+- 최근 신호 목록 (1일/5일/20일 수익률 포함)
 
 ---
 
@@ -131,10 +217,13 @@ docker compose up -d
 | API 서버 | https://richclub.efforthye.dev |
 | API 문서 | https://richclub.efforthye.dev/docs |
 | Jenkins | https://jenkins.efforthye.dev |
+| 프론트엔드 | https://rich-club-front-end.vercel.app |
+| MLOps 대시보드 | https://rich-club-front-end.vercel.app/mlops |
 
 ### Docker 이미지
 - DockerHub: `efforthye/richclub-api:latest`
 - 멀티 플랫폼 빌드: `linux/amd64`, `linux/arm64`
+- 모델 저장 경로 (컨테이너 내부): `/app/models/xgb_model.json`
 
 ### 수동 빌드 및 배포 (Windows)
 
