@@ -7,6 +7,7 @@ pipeline {
         APP_PORT = "8000"
         ENV_FILE = "/var/jenkins_home/.env"
         HOST_IP = "192.168.219.100"
+        MODEL_VOLUME = "/Users/nadeko/models:/app/models"
     }
 
     stages {
@@ -46,6 +47,7 @@ pipeline {
                         --name ${CONTAINER_NAME} \\
                         --restart unless-stopped \\
                         -p ${APP_PORT}:8000 \\
+                        -v ${MODEL_VOLUME} \\
                         --env-file ${ENV_FILE} \\
                         ${IMAGE_NAME}:latest
                 """
