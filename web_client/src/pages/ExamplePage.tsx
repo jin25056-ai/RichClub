@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import GlobalMarketSection from '../containers/example/GlobalMarketSection';
 import AIPredictionsSection from '../containers/example/AIPredictionsSection';
 import StockSearchSection from '../containers/example/StockSearchSection';
@@ -9,6 +10,7 @@ import '../styles/example.css';
 type Period = '1m' | '3m' | '6m';
 
 const ExamplePage: React.FC = () => {
+  const navigate = useNavigate();
   const [selectedStock, setSelectedStock] = useState<{ code: string; name: string } | null>(null);
   const [currentName, setCurrentName] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period>('3m');
@@ -16,6 +18,10 @@ const ExamplePage: React.FC = () => {
   const [marketUpdatedAt, setMarketUpdatedAt] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!localStorage.getItem('access_token')) {
+      navigate('/auth');
+      return;
+    }
     stockApi.getPredictions('매수', 1).then((res) => {
       if (res.data.length > 0) {
         const first = res.data[0];
