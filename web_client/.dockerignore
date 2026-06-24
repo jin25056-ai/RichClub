@@ -3,6 +3,3 @@ build
 .git
 .gitignore
 README.md
-Dockerfile
-Jenkinsfile
-nginx.conf
