@@ -180,6 +180,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
   const [selected, setSelected] = useState<StockItem | null>(null);
   const [period, setPeriod] = useState<Period>('3m');
   const [chartData, setChartData] = useState<any[]>([]);
+  const [rawData, setRawData] = useState<{ trimmed: any[]; futurePadding: any[]; sigMap: Record<string, string> } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
@@ -190,6 +191,18 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  useEffect(() => {
+    if (!rawData) return;
+    const { trimmed, futurePadding, sigMap } = rawData;
+    const all = [...trimmed, ...futurePadding];
+    const finalData = all.map((row, i) => {
+      const prevMa5 = i > 0 ? all[i - 1].ma5 : null;
+      const simpleSell = sellMode === 'simple' && row.ma5 != null && prevMa5 != null && row.ma5 < prevMa5;
+      return { ...row, aiSignal: sigMap[row.datetime] ?? null, simpleSell };
+    });
+    setChartData(finalData);
+  }, [rawData, sellMode]);
 
   useEffect(() => {
     if (externalPeriod && externalPeriod !== period) {
@@ -315,17 +328,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           sigMap[date] = pd.signal;
         });
 
-        const finalData = [...trimmed, ...futurePadding].map((row, i, arr) => {
-          const prevMa5 = i > 0 ? arr[i - 1].ma5 : null;
-          const simpleSell = sellMode === 'simple' && row.ma5 != null && prevMa5 != null && row.ma5 < prevMa5;
-          return {
-            ...row,
-            aiSignal: sigMap[row.datetime] ?? null,
-            simpleSell,
-          };
-        });
-
-        setChartData(finalData);
+        setRawData({ trimmed, futurePadding, sigMap });
       })
       .catch(() => setError('데이터를 불러오지 못했습니다.'))
       .finally(() => setLoading(false));
