@@ -363,8 +363,14 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       if (chartOnly) {
         setSelected({ stock_code: initialStock.code, stock_name: initialStock.name });
         fetchAll(initialStock.code, initialStock.name, p);
-      } else if (!chartOnly && !searchOnly) {
-        setQuery(initialStock.name);
+      } else if (searchOnly) {
+        skipSearch.current = true;
+        setQuery('');
+        setResults([]);
+        setShowDropdown(false);
+      } else {
+        skipSearch.current = true;
+        setQuery('');
         setSelected({ stock_code: initialStock.code, stock_name: initialStock.name });
         setResults([]);
         setShowDropdown(false);
