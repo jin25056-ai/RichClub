@@ -222,7 +222,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       stockApi.getCandles(code, fetchDays),
       stockApi.getRSI(code, p),
       stockApi.getMACD(code, p),
-      stockApi.getPredictions(undefined, 300, name),  // stock_name으로 조회
+      stockApi.getPredictions(undefined, 500, name),  // stock_name으로 조회
     ])
       .then(([candleRes, rsiRes, macdRes, predRes]) => {
         const map: Record<string, any> = {};
@@ -287,11 +287,11 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           return { datetime: futureDate, spanA: ichi?.spanA ?? null, spanB: ichi?.spanB ?? null };
         });
 
-        // AI 신호 매핑 (stock_name 기준으로 가져왔으므로 날짜만 매핑)
+        // AI 신호 매핑 - cutStr 필터 제거, 차트 기간 전체 포함
         const sigMap: Record<string, string> = {};
         (predRes.data || []).forEach((pd: any) => {
           const date = (pd.predicted_at || '').slice(0, 10);
-          if (date >= cutStr) sigMap[date] = pd.signal;
+          sigMap[date] = pd.signal;
         });
 
         const finalData = [...trimmed, ...futurePadding].map((row) => ({
