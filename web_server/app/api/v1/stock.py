@@ -202,6 +202,47 @@ async def get_ai_predictions(
     return result
 
 
+@router.get("/ai/today", response_model=List[AIPredictionItem], summary="오늘 AI 예측 목록")
+async def get_today_predictions(
+    signal: Optional[str] = Query(None, description="매수 / 매도"),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """오늘 날짜 기준 AI 예측 목록 (매수/매도 파라미터)"""
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    query: dict = {"predicted_at": {"$gte": today_start}}
+    if signal in ("매수", "매도", "관망"):
+        query["signal"] = signal
+
+    cursor = db.total_trading_signals.find(query).sort("predicted_at", -1)
+    docs = [doc async for doc in cursor]
+
+    # 종목별 최신 1건만
+    seen: set = set()
+    deduped = []
+    for doc in docs:
+        sname = doc.get("stock_name", "")
+        if sname not in seen:
+            seen.add(sname)
+            deduped.append(doc)
+
+    result = []
+    for doc in deduped:
+        signal_str = doc.get("signal", "관망")
+        signal_label = {v: k for k, v in SIGNAL_MAP.items()}.get(signal_str, 2)
+        result.append(AIPredictionItem(
+            stock_code=doc.get("stock_code", ""),
+            stock_name=doc.get("stock_name", ""),
+            current_price=doc.get("close"),
+            change_pct=None,
+            signal=signal_str,
+            signal_label=signal_label,
+            confidence=doc.get("confidence"),
+            predicted_at=doc.get("predicted_at"),
+        ))
+    return result
+
+
 @router.get("/ai/detail/{stock_code}", response_model=AIDetailResponse, summary="AI 분석 상세")
 async def get_ai_detail(
     stock_code: str, db: AsyncIOMotorDatabase = Depends(_db), _: dict = Depends(get_current_user)
