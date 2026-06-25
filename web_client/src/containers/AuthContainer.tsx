@@ -4,7 +4,7 @@ import { AuthFormValues } from '../types';
 import { login, signup } from '../api';
 import apiClient from '../api/client';
 
-type AuthMode = 'login' | 'signup';
+type AuthMode = 'login' | 'signup' | 'reset';
 type VerifyStep = 'input' | 'sent' | 'verified';
 
 const parseErrorMessage = (err: any): string => {
@@ -148,10 +148,71 @@ const AuthContainer: React.FC = () => {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const expireRef = useRef<NodeJS.Timeout | null>(null);
 
+  // 비밀번호 재설정 상태
+  const [resetStep, setResetStep] = useState<'email' | 'code' | 'password'>('email');
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [resetNewPw, setResetNewPw] = useState('');
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetSending, setResetSending] = useState(false);
+  const [resetExpire, setResetExpire] = useState(0);
+  const resetExpireRef = useRef<NodeJS.Timeout | null>(null);
+  const [showNewPw, setShowNewPw] = useState(false);
+
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (expireRef.current) clearInterval(expireRef.current);
   }, []);
+
+  const handleReset = () => {
+    setMode('login'); setError(null);
+    setResetStep('email'); setResetEmail(''); setResetCode('');
+    setResetNewPw(''); setResetError(null);
+    if (resetExpireRef.current) clearInterval(resetExpireRef.current);
+  };
+
+  const handleResetSendCode = async () => {
+    if (!resetEmail.includes('@')) { setResetError('올바른 이메일을 입력해주세요.'); return; }
+    setResetSending(true); setResetError(null);
+    try {
+      await apiClient.post('/api/v1/auth/email/send-code', { email: resetEmail });
+      setResetStep('code');
+      setResetExpire(300);
+      if (resetExpireRef.current) clearInterval(resetExpireRef.current);
+      resetExpireRef.current = setInterval(() => {
+        setResetExpire((c) => {
+          if (c <= 1) { clearInterval(resetExpireRef.current!); setResetStep('email'); setResetError('인증 시간이 만료되었습니다.'); return 0; }
+          return c - 1;
+        });
+      }, 1000);
+    } catch (err: any) {
+      setResetError(err?.response?.data?.detail ?? '발송에 실패했습니다.');
+    } finally { setResetSending(false); }
+  };
+
+  const handleResetVerify = async () => {
+    if (resetCode.length !== 6) { setResetError('6자리 코드를 입력해주세요.'); return; }
+    setResetError(null);
+    try {
+      await apiClient.post('/api/v1/auth/email/verify-code', { email: resetEmail, code: resetCode });
+      setResetStep('password');
+      if (resetExpireRef.current) clearInterval(resetExpireRef.current);
+    } catch (err: any) {
+      setResetError(err?.response?.data?.detail ?? '인증에 실패했습니다.');
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (resetNewPw.length < 8) { setResetError('비밀번호는 최소 8자 이상이어야 합니다.'); return; }
+    setResetError(null);
+    try {
+      await apiClient.post('/api/v1/auth/password/reset', { email: resetEmail, code: resetCode, new_password: resetNewPw });
+      handleReset();
+      setError('비밀번호가 변경되었습니다. 다시 로그인해 주세요.');
+    } catch (err: any) {
+      setResetError(err?.response?.data?.detail ?? '변경에 실패했습니다.');
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -276,22 +337,23 @@ const AuthContainer: React.FC = () => {
           border: '1px solid rgba(255,255,255,0.07)',
           borderRadius: 10, padding: 3, marginBottom: 24,
         }}>
-          {(['login', 'signup'] as AuthMode[]).map((m) => (
+          {(['login', 'signup', 'reset'] as AuthMode[]).map((m) => (
             <button key={m} onClick={() => { setMode(m); setError(null); setVerifyStep('input'); setVerifyCode(''); }}
               style={{
-                flex: 1, padding: '8px 0', fontSize: 13, fontWeight: mode === m ? 700 : 500,
+                flex: 1, padding: '8px 0', fontSize: 12, fontWeight: mode === m ? 700 : 500,
                 borderRadius: 8, border: 'none', cursor: 'pointer',
                 background: mode === m ? 'rgba(99,102,241,0.25)' : 'transparent',
                 color: mode === m ? '#a5b4fc' : '#4b5563',
                 boxShadow: mode === m ? '0 0 0 1px rgba(99,102,241,0.3)' : 'none',
                 transition: 'all 0.2s',
               }}>
-              {m === 'login' ? '로그인' : '회원가입'}
+              {m === 'login' ? '로그인' : m === 'signup' ? '회원가입' : '비밀번호 찾기'}
             </button>
           ))}
         </div>
 
-        {/* 폼 */}
+        {/* 로그인 / 회원가입 폼 */}
+        {mode !== 'reset' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {mode === 'signup' && (
             <input style={inputStyle} type="text" name="name" placeholder="이름"
@@ -391,6 +453,59 @@ const AuthContainer: React.FC = () => {
             variant="ghost"
           />
         </div>
+        )}
+
+        {/* 비밀번호 찾기 */}
+        {(mode as string) === 'reset' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {error && <p style={{ margin: 0, fontSize: 12, color: '#818cf8' }}>{error}</p>}
+            {resetStep === 'email' && (
+              <>
+                <input style={inputStyle} type="email" placeholder="가입한 이메일"
+                  value={resetEmail} onChange={(e) => setResetEmail(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleResetSendCode(); }} />
+                {resetError && <p style={{ margin: 0, fontSize: 12, color: '#f87171' }}>{resetError}</p>}
+                <GlassButton fullWidth label={resetSending ? '발송중...' : '인증코드 발송'} onClick={handleResetSendCode} disabled={resetSending} variant="ghost" />
+              </>
+            )}
+            {resetStep === 'code' && (
+              <>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>{resetEmail}로 보낸 코드를 입력하세요</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <input style={{ ...inputStyle, width: '100%', letterSpacing: 2 }}
+                      type="text" inputMode="numeric" maxLength={6} placeholder="인증코드 6자리"
+                      value={resetCode}
+                      onChange={(e) => { setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setResetError(null); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleResetVerify(); }} />
+                    <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: resetExpire < 60 ? '#f87171' : '#374151', fontWeight: 500 }}>{fmtTime(resetExpire)}</span>
+                  </div>
+                  <button onClick={handleResetVerify} disabled={resetCode.length !== 6}
+                    style={{ flexShrink: 0, padding: '0 14px', fontSize: 12, fontWeight: 600, borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: resetCode.length === 6 ? '#9ca3af' : '#374151', cursor: resetCode.length === 6 ? 'pointer' : 'default', whiteSpace: 'nowrap' }}>
+                    확인
+                  </button>
+                </div>
+                {resetError && <p style={{ margin: 0, fontSize: 12, color: '#f87171' }}>{resetError}</p>}
+              </>
+            )}
+            {resetStep === 'password' && (
+              <>
+                <div style={{ position: 'relative' }}>
+                  <input style={{ ...inputStyle, paddingRight: 60 }}
+                    type={showNewPw ? 'text' : 'password'} placeholder="새 비밀번호 (최소 8자)"
+                    value={resetNewPw} onChange={(e) => setResetNewPw(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleResetPassword(); }} />
+                  <button onClick={() => setShowNewPw(p => !p)} tabIndex={-1}
+                    style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#4b5563', fontSize: 11, cursor: 'pointer', padding: 0 }}>
+                    {showNewPw ? '숨기기' : '보기'}
+                  </button>
+                </div>
+                {resetError && <p style={{ margin: 0, fontSize: 12, color: '#f87171' }}>{resetError}</p>}
+                <GlassButton fullWidth label="비밀번호 변경" onClick={handleResetPassword} variant="ghost" />
+              </>
+            )}
+          </div>
+        )}
 
         <p onClick={() => navigate('/')}
           style={{ margin: '20px 0 0', fontSize: 12, color: '#374151', textAlign: 'center', cursor: 'pointer' }}>
