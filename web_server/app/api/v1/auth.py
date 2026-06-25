@@ -63,10 +63,10 @@ async def reset_password(
     body: PasswordResetRequest,
     db: AsyncIOMotorDatabase = Depends(db_dep)
 ):
-    """이메일 인증 완료 후 비밀번호 변경"""
-    ok = await verify_code(db, body.email, body.code)
-    if not ok:
-        raise HTTPException(status_code=400, detail="인증코드가 올바르지 않거나 만료되었습니다.")
+    # 인증 완료 여부 확인 (verified=True 상태)
+    verified = await is_email_verified(db, body.email)
+    if not verified:
+        raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="비밀번호는 최소 8자 이상이어야 합니다.")
 
@@ -78,6 +78,8 @@ async def reset_password(
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="가입된 이메일이 아닙니다.")
+    # 사용한 인증 코드 삭제
+    await db.email_verifications.delete_many({"email": body.email})
     return {"message": "비밀번호가 변경되었습니다."}
 
 
