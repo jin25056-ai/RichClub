@@ -74,7 +74,7 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
     logger.info(f"[predictor] 예측 시작: {today}")
 
     col = db.total_trading_signals
-    await col.create_index([(\"stock_name\", ASCENDING), (\"predicted_at\", ASCENDING)])
+    await col.create_index([("stock_name", ASCENDING), ("predicted_at", ASCENDING)])
 
     buf_start = (datetime.strptime(today, '%Y-%m-%d') - timedelta(days=120)).strftime('%Y-%m-%d')
     end_dt = (datetime.strptime(today, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
