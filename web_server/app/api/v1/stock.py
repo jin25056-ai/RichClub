@@ -458,3 +458,39 @@ async def get_candles(
         raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
 
     return CandleResponse(stock_code=stock_code, interval="1d", data=data)
+
+
+@router.get("/chart/candle5m/{stock_code}", response_model=CandleResponse, summary="5분봉 차트 데이터")
+async def get_candles_5m(
+    stock_code: str,
+    days: int = Query(1, ge=1, le=90),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """candles_5m 컬렉션에서 5분봉 데이터 조회. days 기본값 1 (오늘 하루)."""
+    from datetime import timezone as tz
+    since = datetime.utcnow() - timedelta(days=days)
+    cursor = db.candles_5m.find(
+        {"stock_code": stock_code, "datetime": {"$gte": since}},
+        {"_id": 0, "datetime": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+    ).sort("datetime", 1)
+    docs = [doc async for doc in cursor]
+    if not docs:
+        raise HTTPException(status_code=404, detail="5분봉 데이터가 없습니다.")
+
+    data = []
+    for d in docs:
+        dt = d["datetime"]
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tz.utc)
+        kst = dt + timedelta(hours=9)
+        dt_str = kst.strftime("%Y-%m-%d %H:%M")
+        data.append(CandleDataPoint(
+            datetime=dt_str,
+            open=_safe_float(d.get("open")),
+            high=_safe_float(d.get("high")),
+            low=_safe_float(d.get("low")),
+            close=_safe_float(d.get("close")),
+            volume=_safe_float(d.get("volume")),
+        ))
+    return CandleResponse(stock_code=stock_code, interval="5m", data=data)

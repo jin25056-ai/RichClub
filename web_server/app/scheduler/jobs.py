@@ -78,9 +78,11 @@ def start_scheduler() -> None:
                       hour="0,6", minute="0", id="collect_market_data", replace_existing=True)
 
     # 5분봉 수집 (월~금 항상, upsert)
+    # misfire_grace_time=240: 서버 재시작으로 놓쳐도 4분 이내면 재실행
     scheduler.add_job(run_5min_candle_collection, trigger="cron",
                       day_of_week="mon-fri", minute="*/5",
-                      id="collect_5min_candles", replace_existing=True)
+                      id="collect_5min_candles", replace_existing=True,
+                      misfire_grace_time=240)
 
     # 일별 예측 (KST 15:35 = UTC 06:35) - 장 마감 5분 후
     # misfire_grace_time=3600: 서버 재시작 등으로 놓친 경우 1시간 이내면 재실행
