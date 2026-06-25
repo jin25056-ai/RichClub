@@ -187,7 +187,20 @@ const AuthContainer: React.FC = () => {
     try {
       await apiClient.post('/api/v1/auth/email/send-code', { email: form.email });
       setVerifyStep('sent');
-      startTimers();
+      // 만료 5분 타이머만
+      setExpireCountdown(300);
+      if (expireRef.current) clearInterval(expireRef.current);
+      expireRef.current = setInterval(() => {
+        setExpireCountdown((c) => {
+          if (c <= 1) {
+            clearInterval(expireRef.current!);
+            setVerifyStep('input');
+            setVerifyError('인증 시간이 만료되었습니다. 다시 발송해주세요.');
+            return 0;
+          }
+          return c - 1;
+        });
+      }, 1000);
     } catch (err: any) {
       setVerifyError(err?.response?.data?.detail ?? '발송에 실패했습니다.');
     } finally {
@@ -296,17 +309,16 @@ const AuthContainer: React.FC = () => {
             {mode === 'signup' && verifyStep !== 'verified' && (
               <button
                 onClick={handleSendCode}
-                disabled={sendingCode || countdown > 0}
+                disabled={sendingCode}
                 style={{
                   flexShrink: 0, padding: '0 14px', fontSize: 12, fontWeight: 600,
-                  borderRadius: 10, border: '1px solid rgba(99,102,241,0.4)',
-                  background: countdown > 0 ? 'transparent' : 'rgba(99,102,241,0.2)',
-                  color: countdown > 0 ? '#4b5563' : '#a5b4fc',
-                  cursor: countdown > 0 ? 'default' : 'pointer',
-                  backdropFilter: 'blur(8px)', whiteSpace: 'nowrap',
-                  transition: 'all 0.2s',
+                  borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)',
+                  background: 'transparent',
+                  color: '#6b7280',
+                  cursor: sendingCode ? 'default' : 'pointer',
+                  whiteSpace: 'nowrap', transition: 'all 0.2s',
                 }}>
-                {sendingCode ? '발송중' : countdown > 0 ? `${countdown}s` : verifyStep === 'sent' ? '재발송' : '인증'}
+                {sendingCode ? '발송중' : verifyStep === 'sent' ? '재발송' : '인증'}
               </button>
             )}
             {mode === 'signup' && verifyStep === 'verified' && (
@@ -314,31 +326,36 @@ const AuthContainer: React.FC = () => {
             )}
           </div>
 
-          {/* 코드 입력 */}
+          {/* 코드 입력 - 일반 인풀 */}
           {mode === 'signup' && verifyStep === 'sent' && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <CodeInput value={verifyCode} onChange={setVerifyCode} onComplete={handleVerifyCode} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <input
+                  style={{ ...inputStyle, width: '100%', letterSpacing: 2 }}
+                  type="text" inputMode="numeric" maxLength={6}
+                  placeholder="인증코드 6자리"
+                  value={verifyCode}
+                  onChange={(e) => { setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setVerifyError(null); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleVerifyCode(); }}
+                />
+                <span style={{
+                  position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                  fontSize: 10, color: expireCountdown < 60 ? '#f87171' : '#374151', fontWeight: 500,
+                }}>{fmtTime(expireCountdown)}</span>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
-                <button
-                  onClick={handleVerifyCode}
-                  disabled={verifyCode.length !== 6}
-                  style={{
-                    padding: '0 14px', height: 44, fontSize: 12, fontWeight: 600,
-                    borderRadius: 10, border: '1px solid rgba(99,102,241,0.4)',
-                    background: verifyCode.length === 6 ? 'rgba(99,102,241,0.25)' : 'transparent',
-                    color: verifyCode.length === 6 ? '#a5b4fc' : '#374151',
-                    cursor: verifyCode.length === 6 ? 'pointer' : 'default',
-                    backdropFilter: 'blur(8px)', whiteSpace: 'nowrap',
-                    transition: 'all 0.2s',
-                  }}>
-                  확인
-                </button>
-                <span style={{ fontSize: 10, color: expireCountdown < 60 ? '#f87171' : '#374151', fontWeight: 500 }}>
-                  {fmtTime(expireCountdown)}
-                </span>
-              </div>
+              <button
+                onClick={handleVerifyCode}
+                disabled={verifyCode.length !== 6}
+                style={{
+                  flexShrink: 0, padding: '0 14px', fontSize: 12, fontWeight: 600,
+                  borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)',
+                  background: 'transparent',
+                  color: verifyCode.length === 6 ? '#9ca3af' : '#374151',
+                  cursor: verifyCode.length === 6 ? 'pointer' : 'default',
+                  whiteSpace: 'nowrap', transition: 'all 0.2s',
+                }}>
+                확인
+              </button>
             </div>
           )}
 
