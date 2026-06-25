@@ -6,6 +6,7 @@ import {
 import { stockApi, StockItem } from '../../api/stock';
 
 type Period = '1m' | '3m' | '6m';
+type ChartInterval = '1d' | '5m';
 
 const Y_AXIS_WIDTH = 58;
 const SYNC_ID = 'stock-sync';
@@ -247,6 +248,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
   const [results, setResults] = useState<StockItem[]>([]);
   const [selected, setSelected] = useState<StockItem | null>(null);
   const [period, setPeriod] = useState<Period>('3m');
+  const [chartInterval, setChartInterval] = useState<ChartInterval>('1d');
   const [chartData, setChartData] = useState<any[]>([]);
   const [rawData, setRawData] = useState<{ trimmed: any[]; futurePadding: any[]; sigMap: Record<string, string> } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -412,6 +414,26 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     return () => clearTimeout(timer);
   }, [query]);
 
+  const fetch5m = (code: string) => {
+    if (searchOnly) return;
+    setLoading(true);
+    setError('');
+    stockApi.getCandles5m(code, 1)
+      .then((res) => {
+        const data = res.data.data.map((d: any) => ({
+          ...d,
+          open:  d.open  != null ? Math.round(d.open)  : null,
+          high:  d.high  != null ? Math.round(d.high)  : null,
+          low:   d.low   != null ? Math.round(d.low)   : null,
+          close: d.close != null ? Math.round(d.close) : null,
+        }));
+        setChartData(data);
+        setViewRange(null);
+      })
+      .catch(() => setError('5분봉 데이터를 불러오지 못했습니다.'))
+      .finally(() => setLoading(false));
+  };
+
   const fetchAll = (code: string, name: string, p: Period) => {
     if (searchOnly) return;
     setLoading(true);
@@ -509,12 +531,22 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       .finally(() => setLoading(false));
   };
 
+  const handleIntervalToggle = (interval: ChartInterval) => {
+    setChartInterval(interval);
+    if (!selected) return;
+    if (interval === '5m') fetch5m(selected.stock_code);
+    else fetchAll(selected.stock_code, selected.stock_name, externalPeriod ?? period);
+  };
+
   const handleSelect = (item: StockItem) => {
     skipSearch.current = true;
     setSelected(item); setResults([]); setShowDropdown(false);
     setQuery(item.stock_name);
     onStockChange?.(item.stock_code, item.stock_name);
-    if (!searchOnly) fetchAll(item.stock_code, item.stock_name, externalPeriod ?? period);
+    if (!searchOnly) {
+      if (chartInterval === '5m') fetch5m(item.stock_code);
+      else fetchAll(item.stock_code, item.stock_name, externalPeriod ?? period);
+    }
   };
 
   const visData = React.useMemo(
@@ -561,10 +593,50 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
 
   return (
     <div>
+      {/* 일봉 / 5분봉 토글 */}
+      {selected && (
+        <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+          {(['1d', '5m'] as ChartInterval[]).map((iv) => (
+            <button key={iv} onClick={() => handleIntervalToggle(iv)}
+              style={{
+                padding: '2px 10px', fontSize: 11, borderRadius: 4, border: 'none', cursor: 'pointer',
+                background: chartInterval === iv ? '#6366f1' : '#1e1e2e',
+                color: chartInterval === iv ? '#fff' : '#888',
+              }}>
+              {iv === '1d' ? '일봉' : '5분봉'}
+            </button>
+          ))}
+          {chartInterval === '5m' && (
+            <span style={{ fontSize: 10, color: '#6b7280', alignSelf: 'center', marginLeft: 4 }}>오늘 장중 데이터</span>
+          )}
+        </div>
+      )}
+
       {loading && <div className="ex-loading">불러오는 중...</div>}
       {error && <div className="ex-error">{error}</div>}
 
-      {!loading && chartData.length > 0 && (
+      {!loading && chartData.length > 0 && chartInterval === '5m' && (
+        <div ref={chartWrapRef} onMouseDown={handleMouseDown} onDoubleClick={handleDoubleClick}
+          style={{ cursor: 'crosshair', userSelect: 'none' }}>
+          <div style={{ fontSize: 10, color: '#666', marginBottom: 2 }}>5분봉 (오늘 장중)</div>
+          <ResponsiveContainer width="100%" height={heights.candle + heights.macd + heights.rsi}>
+            <ComposedChart data={visData} margin={MARGIN}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
+              <XAxis dataKey="datetime" tick={{ fontSize: 9, fill: '#555' }} interval="preserveStartEnd" height={14} />
+              <YAxis domain={[visPMin, visPMax]} tick={{ fontSize: 9, fill: '#aaa' }} width={Y_AXIS_WIDTH}
+                tickFormatter={(v) => v >= 1000 ? String((v / 1000).toFixed(0)) + 'K' : String(Math.round(v))} />
+              <Tooltip content={<CandleTooltip />} />
+              <Bar dataKey="close" shape={CandleShape} isAnimationActive={false} maxBarSize={6}>
+                {visData.map((d, i) => (
+                  <Cell key={i} fill={(d.close ?? 0) >= (d.open ?? 0) ? '#16a34a' : '#dc2626'} />
+                ))}
+              </Bar>
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {!loading && chartData.length > 0 && chartInterval === '1d' && (
         <div
           ref={chartWrapRef}
           onMouseDown={handleMouseDown}

@@ -116,6 +116,9 @@ export const stockApi = {
 
   getCandles: (stock_code: string, days = 1) =>
     apiClient.get<CandleResponse>(`/api/v1/stock/chart/candle/${stock_code}`, { params: { days } }),
+
+  getCandles5m: (stock_code: string, days = 1) =>
+    apiClient.get<CandleResponse>(`/api/v1/stock/chart/candle5m/${stock_code}`, { params: { days } }),
 };
 
 export const marketApi = {
@@ -124,12 +127,12 @@ export const marketApi = {
   getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate', { params }),
 
-
   getWinRateCombined: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/combined', { params }),
 
   getWinRateIndicator: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/indicator', { params }),
+
   getWinRateSimple: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/simple', { params }),
 };
