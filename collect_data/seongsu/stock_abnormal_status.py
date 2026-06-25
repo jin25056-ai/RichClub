@@ -89,7 +89,7 @@ df[feature_cols] = df.groupby('stock_code')[feature_cols].transform(
 
 df = df.dropna(subset=feature_cols)
 
-def make_sequences(df, window=30):
+def make_sequences(df, window=60):
     X, meta = [], []
     for code, group in df.groupby('stock_code'):
         group = group.sort_values('date')
@@ -100,7 +100,7 @@ def make_sequences(df, window=30):
             meta.append((code, name, group['date'].iloc[i+window]))
     return np.array(X), meta
 
-X, meta = make_sequences(df, window=30)
+X, meta = make_sequences(df, window=60)
 
 
 timesteps, n_features = X.shape[1], X.shape[2]
