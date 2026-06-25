@@ -120,8 +120,10 @@ const tipHeader = (label: string, ...badges: (React.ReactElement | null)[]) => (
 
 const getCompositeSignal = (d: any) => {
   if (!d) return null;
+  // 일목균형표 침체 (최우선 판단) — 선행스팬 역배열 + 캐들 스팬 A 아래
+  if (d.ichimokuStagnant) return { label: '침체(일목)', sub: '선행스팬 역배열+스팬A 아래', color: '#6b7280', stagnant: true };
   // MA60 하락 중 = 침체 구간 → 매수/매도 신호 없음
-  if (d.ma60Falling) return { label: '침체 구간', sub: 'MA60 하락중 매수금지', color: '#6b7280', stagnant: true };
+  if (d.ma60Falling) return { label: '침체(MA60)', sub: 'MA60 하락중 매수금지', color: '#6b7280', stagnant: true };
   // MA60 턴 시점 = 최우선 매수 신호
   if (d.ma60Turning) return { label: 'MA60 턴', sub: '60일선 반등 - 매수 타이밍', color: '#f0abfc', turning: true };
   if (d.rsiBreakDown) return { label: '강한 매도', sub: 'RSI 70 하방이탈', color: '#dc2626' };
@@ -279,7 +281,10 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       const prevPrev = i > 1 ? all[i - 2] : null;
       const ma60Turning = prevPrev?.ma60 != null && prev?.ma60 != null && row.ma60 != null
         && prev.ma60 < prevPrev.ma60 && row.ma60 >= prev.ma60;
-      return { ...row, aiSignal: sigMap[row.datetime] ?? null, simpleSell, goldenCross, deadCross, rsiBreakDown, ma60Falling, ma60Turning };
+      // 일목균형표 침체 조건: 선행스팬 역배열(spanA < spanB) AND 캐들이 spanA 아래
+      const ichimokuStagnant = row.spanA != null && row.spanB != null && row.close != null
+        && row.spanA < row.spanB && row.close < row.spanA;
+      return { ...row, aiSignal: sigMap[row.datetime] ?? null, simpleSell, goldenCross, deadCross, rsiBreakDown, ma60Falling, ma60Turning, ichimokuStagnant };
     });
     setChartData(finalData);
     setViewRange(null);
@@ -600,7 +605,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
                 {visData.map((d, i) => (
                   <Cell key={i}
                     fill={(d.close ?? 0) >= (d.open ?? 0) ? '#16a34a' : '#dc2626'}
-                    fillOpacity={d.ma60Falling ? 0.25 : 1}
+                    fillOpacity={d.ichimokuStagnant ? 0.15 : d.ma60Falling ? 0.25 : 1}
                   />
                 ))}
               </Bar>
