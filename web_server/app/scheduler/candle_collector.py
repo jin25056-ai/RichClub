@@ -14,7 +14,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 logger = logging.getLogger(__name__)
 
-KEEP_DAYS = 30
+KEEP_DAYS = 90
 
 
 async def _get_target_stocks(db: AsyncIOMotorDatabase) -> list:

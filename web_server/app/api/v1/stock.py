@@ -33,6 +33,13 @@ def _db() -> AsyncIOMotorDatabase:
     return get_db()
 
 
+def _period_to_days(period: str) -> Optional[int]:
+    """period 문자열을 일수로 변환. 'all'이면 None 반환 (전체)."""
+    if period == "all":
+        return None
+    return PERIOD_DAYS.get(period)
+
+
 class CandleDataPoint(BaseModel):
     datetime: str
     open: Optional[float]
@@ -98,6 +105,346 @@ def _calc_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9):
     return macd_line, signal_line, histogram
 
 
+@router.get("/today-signals", summary="종합 신호 목록")
+async def get_today_signals(
+    days: int = Query(1, ge=1, le=7, description="최근 N일 데이터 기준"),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """
+    차트 툴팁과 동일한 getCompositeSignal 로직을 전체 종목에 적용.
+    오늘 날짜 기준 최신 데이터로 신호 계산 후 매수 우선 정렬 반환.
+    """
+    since = datetime.utcnow() - timedelta(days=days + 120)
+
+    # 종목별 최근 120일 데이터 수집
+    pipeline = [
+        {"$match": {"predicted_at": {"$gte": since}, "close": {"$ne": None}}},
+        {"$sort": {"predicted_at": 1}},
+        {"$group": {
+            "_id": "$stock_code",
+            "stock_name": {"$last": "$stock_name"},
+            "closes":  {"$push": "$close"},
+            "opens":   {"$push": "$open"},
+            "highs":   {"$push": "$high"},
+            "lows":    {"$push": "$low"},
+            "ma5":     {"$last": "$ma5"},
+            "ma20":    {"$last": "$ma20"},
+            "ma60":    {"$last": "$ma60"},
+            "ma60_prev": {"$push": "$ma60"},
+        }},
+    ]
+
+    SIGNAL_ORDER = {
+        "강한 매수": 0,
+        "MA60 턴":   1,
+        "골든보":    2,
+        "매수 우세": 3,
+        "음봉 주의": 4,
+        "중립":      5,
+        "매도 우세": 6,
+        "강한 매도": 7,
+        "침체(MA60)": 8,
+        "침체(일목)": 9,
+    }
+
+    result = []
+    async for doc in db.total_trading_signals.aggregate(pipeline):
+        closes_raw = doc.get("closes", [])
+        closes = [float(c) for c in closes_raw if c is not None]
+        opens_raw = doc.get("opens", [])
+        opens = [float(o) for o in opens_raw if o is not None]
+        if len(closes) < 3:
+            continue
+
+        close = closes[-1]
+        open_ = opens[-1] if opens else close
+        ma5  = float(doc["ma5"])  if doc.get("ma5")  else (sum(closes[-5:])  / 5  if len(closes) >= 5  else None)
+        ma20 = float(doc["ma20"]) if doc.get("ma20") else (sum(closes[-20:]) / 20 if len(closes) >= 20 else None)
+        ma60 = float(doc["ma60"]) if doc.get("ma60") else (sum(closes[-60:]) / 60 if len(closes) >= 60 else None)
+
+        # ma60 직전값 (턴 감지용)
+        ma60_list = [float(v) for v in doc.get("ma60_prev", []) if v is not None]
+        ma60_prev  = ma60_list[-2] if len(ma60_list) >= 2 else None
+        ma60_prev2 = ma60_list[-3] if len(ma60_list) >= 3 else None
+
+        # RSI 계산
+        rsi_vals = _calc_rsi(closes)
+        rsi = rsi_vals[-1]
+
+        # MACD 계산
+        macd_line, sig_line, _ = _calc_macd(closes)
+        macd     = macd_line[-1]
+        macd_sig = sig_line[-1]
+        macd_prev     = macd_line[-2] if len(macd_line) >= 2 else None
+        macd_sig_prev = sig_line[-2]  if len(sig_line) >= 2  else None
+
+        is_bear_candle = open_ is not None and close < open_
+
+        # MA60 방향
+        ma60_falling = ma60 is not None and ma60_prev is not None and ma60 < ma60_prev
+        ma60_turning = (
+            ma60_prev2 is not None and ma60_prev is not None and ma60 is not None
+            and ma60_prev < ma60_prev2 and ma60 >= ma60_prev
+        )
+
+        # 스팬A/B 계산 (일목 침체용) - 간이 계산
+        def hi(arr, n): return max(arr[-n:]) if len(arr) >= n else None
+        def lo(arr, n): return min(arr[-n:]) if len(arr) >= n else None
+        lows_raw = [float(v) for v in doc.get("lows", []) if v is not None]
+        highs_raw = [float(v) for v in doc.get("highs", []) if v is not None]
+        tenkan = ((hi(highs_raw, 9) or 0) + (lo(lows_raw, 9) or 0)) / 2 if len(highs_raw) >= 9 else None
+        kijun  = ((hi(highs_raw, 26) or 0) + (lo(lows_raw, 26) or 0)) / 2 if len(highs_raw) >= 26 else None
+        span_a = (tenkan + kijun) / 2 if tenkan and kijun else None
+        span_b = ((hi(highs_raw, 52) or 0) + (lo(lows_raw, 52) or 0)) / 2 if len(highs_raw) >= 52 else None
+        ichimoku_stagnant = (
+            span_a and span_b and close
+            and span_a < span_b and close < span_a
+        )
+
+        # 골든보: MA60 우상향 + 최근 20봉 내 close < ma60 구간 있었고 + 현재 close > ma60 + MACD 상단
+        golden_bo = False
+        if (ma60 and not ma60_falling and close > ma60
+                and macd and macd_sig and macd > macd_sig
+                and not ichimoku_stagnant):
+            recent = closes[-20:]
+            if any(c < ma60 * 1.01 for c in recent[:-1]):
+                golden_bo = True
+
+        # getCompositeSignal 동일 로직
+        if golden_bo:
+            signal = "골든보"
+            sub = "MA60 U자 지지 반등"
+        elif ichimoku_stagnant:
+            signal = "침체(일목)"
+            sub = "선행스팬 역배열"
+        elif ma60_falling:
+            signal = "침체(MA60)"
+            sub = "MA60 하락중"
+        elif ma60_turning:
+            signal = "MA60 턴"
+            sub = "60일선 반등 전환점"
+        elif rsi is not None and rsi_vals[-2] is not None and rsi_vals[-2] >= 70 and rsi < 70:
+            signal = "강한 매도"
+            sub = "RSI 70 하방이탈"
+        else:
+            bull = 0; bear = 0
+            if ma5 and ma20 and ma60:
+                if ma5 > ma20 > ma60: bull += 1
+                elif ma5 < ma20 < ma60: bear += 1
+            if macd and macd_sig:
+                if macd > macd_sig: bull += 1
+                else: bear += 1
+            if rsi is not None:
+                if rsi <= 30: bull += 1
+                elif rsi >= 70: bear += 1
+                else: bull += 0.5
+            score = bull - bear
+
+            if is_bear_candle and score >= 1.5:
+                signal = "음봉 주의"
+                sub = "지표 매수지만 음봉"
+            elif score >= 2.5:
+                signal = "강한 매수"
+                sub = "3개 지표 매수"
+            elif score >= 1.5:
+                signal = "매수 우세"
+                sub = "2개 지표 매수"
+            elif score <= -2:
+                signal = "강한 매도"
+                sub = "3개 지표 매도"
+            elif score <= -1:
+                signal = "매도 우세"
+                sub = "2개 지표 매도"
+            else:
+                signal = "중립"
+                sub = "지표 혼재"
+
+        # 태그 생성 (인디케이터 상태들)
+        tags = []
+        if ma5 and ma20 and ma60:
+            if float(ma5) > float(ma20) > float(ma60):
+                tags.append({"label": "MA 정배열", "color": "#16a34a"})
+            elif float(ma5) < float(ma20) < float(ma60):
+                tags.append({"label": "MA 역배열", "color": "#dc2626"})
+        if macd is not None and macd_sig is not None:
+            if macd > macd_sig:
+                tags.append({"label": "MACD↑", "color": "#4ade80"})
+            else:
+                tags.append({"label": "MACD↓", "color": "#f87171"})
+        if rsi is not None:
+            if rsi <= 30:
+                tags.append({"label": f"RSI {round(rsi,1)} 과매도", "color": "#4ade80"})
+            elif rsi >= 70:
+                tags.append({"label": f"RSI {round(rsi,1)} 과매수", "color": "#f87171"})
+            else:
+                tags.append({"label": f"RSI {round(rsi,1)}", "color": "#6b7280"})
+        if golden_bo:
+            tags.append({"label": "골든보", "color": "#f0abfc"})
+        if ma60_turning:
+            tags.append({"label": "MA60 턴", "color": "#f0abfc"})
+        if is_bear_candle:
+            tags.append({"label": "음봉", "color": "#f59e0b"})
+        if ichimoku_stagnant:
+            tags.append({"label": "일목침체", "color": "#6b7280"})
+        elif span_a and span_b and close and close > max(float(span_a), float(span_b)):
+            tags.append({"label": "일목양운↑", "color": "#4ade80"})
+
+        result.append({
+            "stock_code": doc["_id"],
+            "stock_name": doc.get("stock_name", ""),
+            "signal": signal,
+            "sub": sub,
+            "tags": tags,
+            "close": round(float(close)) if close else None,
+            "rsi": round(float(rsi), 1) if rsi is not None else None,
+            "ma_align": "정배열" if (ma5 and ma20 and ma60 and float(ma5) > float(ma20) > float(ma60))
+                        else "역배열" if (ma5 and ma20 and ma60 and float(ma5) < float(ma20) < float(ma60))
+                        else "혼재",
+            "macd_bull": bool(macd > macd_sig) if (macd is not None and macd_sig is not None) else None,
+        })
+
+    result.sort(key=lambda x: (SIGNAL_ORDER.get(x["signal"], 99)))
+    return result
+
+
+@router.get("/indicator-signals", summary="지표 기반 종목 신호 목록")
+async def get_indicator_signals(
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """
+    전체 종목의 최근 3개월 데이터를 기반으로 MA/RSI/MACD 지표 계산 후 종합 신호 반환
+    """
+    # 종목별 최근 90일 데이터 조회
+    since = datetime.utcnow() - timedelta(days=90)
+    pipeline = [
+        {"$match": {"predicted_at": {"$gte": since}, "close": {"$ne": None}}},
+        {"$sort": {"predicted_at": 1}},
+        {"$group": {
+            "_id": "$stock_code",
+            "stock_name": {"$last": "$stock_name"},
+            "closes": {"$push": "$close"},
+            "ma5":   {"$last": "$ma5"},
+            "ma20":  {"$last": "$ma20"},
+            "ma60":  {"$last": "$ma60"},
+            "rsi":   {"$last": "$rsi"},
+        }},
+    ]
+
+    result = []
+    async for doc in db.total_trading_signals.aggregate(pipeline):
+        closes_raw = doc.get("closes", [])
+        closes = [float(c) for c in closes_raw if c is not None]
+        if not closes:
+            continue
+
+        ma5  = doc.get("ma5")
+        ma20 = doc.get("ma20")
+        ma60 = doc.get("ma60")
+        close = closes[-1]
+
+        # MA가 없으면 closes로 직접 계산
+        if not ma5 and len(closes) >= 5:
+            ma5 = sum(closes[-5:]) / 5
+        if not ma20 and len(closes) >= 20:
+            ma20 = sum(closes[-20:]) / 20
+        if not ma60 and len(closes) >= 60:
+            ma60 = sum(closes[-60:]) / 60
+
+        # RSI 계산
+        rsi = doc.get("rsi")
+        if rsi is None and len(closes) >= 15:
+            rsi_vals = _calc_rsi(closes)
+            rsi = rsi_vals[-1]
+
+        # MACD 계산 (closes로 직접)
+        macd_val, sig_val, _ = _calc_macd(closes)
+        macd = macd_val[-1]
+        macd_sig = sig_val[-1]
+
+        bull = 0
+        bear = 0
+        reasons = []
+
+        if ma5 and ma20 and ma60:
+            if float(ma5) > float(ma20) > float(ma60):
+                bull += 1
+                reasons.append("MA 정배열")
+            elif float(ma5) < float(ma20) < float(ma60):
+                bear += 1
+                reasons.append("MA 역배열")
+
+        if rsi is not None:
+            if rsi <= 30:
+                bull += 1
+                reasons.append("RSI 과매도")
+            elif rsi >= 70:
+                bear += 1
+                reasons.append("RSI 과매수")
+            else:
+                bull += 0.5
+
+        if macd is not None and macd_sig is not None:
+            if macd > macd_sig:
+                bull += 1
+                reasons.append("MACD 상단")
+            else:
+                bear += 1
+                reasons.append("MACD 하단")
+
+        score = bull - bear
+        if score >= 2:
+            signal = "매수"
+        elif score >= 1:
+            signal = "매수 우세"
+        elif score <= -2:
+            signal = "매도"
+        elif score <= -1:
+            signal = "매도 우세"
+        else:
+            signal = "중립"
+
+        result.append({
+            "stock_code": doc["_id"],
+            "stock_name": doc.get("stock_name", ""),
+            "signal": signal,
+            "score": round(score, 1),
+            "reasons": reasons,
+            "rsi": round(float(rsi), 1) if rsi is not None else None,
+            "ma_align": "정배열" if (ma5 and ma20 and ma60 and float(ma5) > float(ma20) > float(ma60))
+                        else "역배열" if (ma5 and ma20 and ma60 and float(ma5) < float(ma20) < float(ma60))
+                        else "혼재",
+            "macd_bull": bool(macd > macd_sig) if (macd is not None and macd_sig is not None) else None,
+            "close": round(float(close)) if close else None,
+        })
+
+    order = {"매수": 0, "매수 우세": 1, "중립": 2, "매도 우세": 3, "매도": 4}
+    result.sort(key=lambda x: (order.get(x["signal"], 5), -(x["score"] or 0)))
+    return result
+
+
+@router.get("/price/{stock_code}", summary="종목 현재가 조회")
+async def get_current_price(
+    stock_code: str,
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """DB의 가장 최근 종가 반환"""
+    doc = await db.total_trading_signals.find_one(
+        {"stock_code": stock_code, "close": {"$ne": None}},
+        sort=[("predicted_at", -1)],
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
+    return {
+        "stock_code": stock_code,
+        "stock_name": doc.get("stock_name", ""),
+        "close": doc.get("close"),
+        "predicted_at": doc.get("predicted_at"),
+    }
+
+
 @router.get("/list", response_model=List[StockItem], summary="종목 리스트")
 async def get_stock_list(db: AsyncIOMotorDatabase = Depends(_db), _: dict = Depends(get_current_user)):
     cursor = db.total_trading_signals.aggregate([
@@ -142,16 +489,14 @@ async def get_ai_predictions(
         query["signal"] = signal
     if stock_name:
         query["stock_name"] = stock_name
-        limit = 10000  # 종목 지정 시 전체 조회
+        limit = 10000
 
     cursor = db.total_trading_signals.find(query).sort("predicted_at", -1).limit(limit)
     docs = [doc async for doc in cursor]
 
-    # stock_name 지정 시 전체 날짜 반환 (중복 제거 안 함)
     if stock_name:
         deduped = docs
     else:
-        # 종목별 최신 1건만 (중복 제거)
         seen: set = set()
         deduped = []
         for doc in docs:
@@ -161,7 +506,6 @@ async def get_ai_predictions(
                 deduped.append(doc)
     docs = deduped
 
-    # 종목별 직전 close를 aggregate 한 방에 조회
     stock_names = list({doc.get("stock_name") for doc in docs if doc.get("stock_name")})
     prev_close_map: dict = {}
 
@@ -176,7 +520,6 @@ async def get_ai_predictions(
         ]
         async for row in db.total_trading_signals.aggregate(pipeline):
             closes = row.get("closes", [])
-            # closes[0] = 최신, closes[1] = 직전
             prev_close_map[row["_id"]] = closes[1] if len(closes) > 1 else None
 
     result = []
@@ -217,7 +560,6 @@ async def get_today_predictions(
     cursor = db.total_trading_signals.find(query).sort("predicted_at", -1)
     docs = [doc async for doc in cursor]
 
-    # 종목별 최신 1건만
     seen: set = set()
     deduped = []
     for doc in docs:
@@ -226,7 +568,6 @@ async def get_today_predictions(
             seen.add(sname)
             deduped.append(doc)
 
-    # 전날 대비 등락률 계산
     stock_names = list({doc.get("stock_name") for doc in deduped if doc.get("stock_name")})
     prev_close_map: dict = {}
     if stock_names:
@@ -296,29 +637,38 @@ async def get_ai_detail(
 
 @router.get("/chart/rsi/{stock_code}", response_model=RSIResponse, summary="RSI 차트 데이터")
 async def get_rsi(
-    stock_code: str, period: str = Query("3m"),
-    db: AsyncIOMotorDatabase = Depends(_db), _: dict = Depends(get_current_user)
+    stock_code: str,
+    period: str = Query("3m", description="1m / 3m / 6m / all"),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
 ):
-    if period not in PERIOD_DAYS:
-        raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m 중 하나여야 합니다.")
-    days = PERIOD_DAYS[period]
-    since = datetime.utcnow() - timedelta(days=days + 20)
+    days = _period_to_days(period)
+    if days is None and period != "all":
+        raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나여야 합니다.")
+
+    # RSI 계산을 위해 버퍼 포함 조회 (전체 기간이면 날짜 필터 없음)
+    query: dict = {"stock_code": stock_code}
+    if days is not None:
+        query["predicted_at"] = {"$gte": datetime.utcnow() - timedelta(days=days + 20)}
+
     cursor = db.total_trading_signals.find(
-        {"stock_code": stock_code, "predicted_at": {"$gte": since}},
+        query,
         {"predicted_at": 1, "close": 1, "rsi": 1, "stock_name": 1, "_id": 0}
     ).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]
     if not docs:
         raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
+
     stock_name = docs[0].get("stock_name", "")
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.utcnow() - timedelta(days=days) if days is not None else None
+
     data = []
     has_rsi = any(d.get("rsi") is not None for d in docs)
     if has_rsi:
         for d in docs:
             dt = d["predicted_at"]
             dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
-            if dt_naive >= cutoff and d.get("rsi") is not None:
+            if (cutoff is None or dt_naive >= cutoff) and d.get("rsi") is not None:
                 data.append(RSIDataPoint(date=dt.strftime("%Y-%m-%d"), rsi=round(float(d["rsi"]), 2)))
     else:
         closes = [float(d["close"]) for d in docs if d.get("close")]
@@ -326,36 +676,46 @@ async def get_rsi(
         rsi_values = _calc_rsi(closes)
         for i, dt in enumerate(dates):
             dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
-            if dt_naive >= cutoff and rsi_values[i] is not None:
+            if (cutoff is None or dt_naive >= cutoff) and rsi_values[i] is not None:
                 data.append(RSIDataPoint(date=dt.strftime("%Y-%m-%d"), rsi=round(rsi_values[i], 2)))
+
     return RSIResponse(stock_code=stock_code, stock_name=stock_name, period=period, data=data)
 
 
 @router.get("/chart/macd/{stock_code}", response_model=MACDResponse, summary="MACD 차트 데이터")
 async def get_macd(
-    stock_code: str, period: str = Query("3m"),
-    db: AsyncIOMotorDatabase = Depends(_db), _: dict = Depends(get_current_user)
+    stock_code: str,
+    period: str = Query("3m", description="1m / 3m / 6m / all"),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
 ):
-    if period not in PERIOD_DAYS:
-        raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m 중 하나여야 합니다.")
-    days = PERIOD_DAYS[period]
-    since = datetime.utcnow() - timedelta(days=days + 40)
+    days = _period_to_days(period)
+    if days is None and period != "all":
+        raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나여야 합니다.")
+
+    query: dict = {"stock_code": stock_code}
+    if days is not None:
+        query["predicted_at"] = {"$gte": datetime.utcnow() - timedelta(days=days + 40)}
+
     cursor = db.total_trading_signals.find(
-        {"stock_code": stock_code, "predicted_at": {"$gte": since}},
+        query,
         {"predicted_at": 1, "close": 1, "macd": 1, "stock_name": 1, "_id": 0}
     ).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]
     if not docs:
         raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
+
     stock_name = docs[0].get("stock_name", "")
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.utcnow() - timedelta(days=days) if days is not None else None
+
     closes = [float(d["close"]) for d in docs if d.get("close")]
     dates = [d["predicted_at"] for d in docs if d.get("close")]
     macd_line, signal_line, histogram = _calc_macd(closes)
+
     data = []
     for i, dt in enumerate(dates):
         dt_naive = dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
-        if dt_naive >= cutoff and macd_line[i] is not None:
+        if (cutoff is None or dt_naive >= cutoff) and macd_line[i] is not None:
             data.append(MACDDataPoint(
                 date=dt.strftime("%Y-%m-%d"),
                 macd=round(macd_line[i], 4),
@@ -368,21 +728,23 @@ async def get_macd(
 @router.get("/chart/candle/{stock_code}", response_model=CandleResponse, summary="캔들 차트 데이터")
 async def get_candles(
     stock_code: str,
-    days: int = Query(90, ge=1, le=730),
+    days: int = Query(0, ge=0, le=9999, description="0이면 전체 기간"),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    since = datetime.utcnow() - timedelta(days=days)
+    # days=0 이면 전체 기간, 아니면 해당 일수
+    query: dict = {"$or": [{"stock_code": stock_code}, {"stock_name": stock_code}]}
+    if days > 0:
+        query["predicted_at"] = {"$gte": datetime.utcnow() - timedelta(days=days)}
 
-    # 1) DB 일봉 - stock_code 또는 stock_name 둘 다 시도 (날짜 필터 없이 전체)
     cursor = db.total_trading_signals.find(
-        {"$or": [{"stock_code": stock_code}, {"stock_name": stock_code}]},
+        query,
         {"_id": 0, "predicted_at": 1, "open": 1, "high": 1, "low": 1, "close": 1,
          "volume": 1, "ma5": 1, "ma20": 1, "ma60": 1}
     ).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]
 
-    if len(docs) >= 1:
+    if docs:
         data = []
         for d in docs:
             dt = d["predicted_at"]
@@ -397,7 +759,7 @@ async def get_candles(
             ))
         return CandleResponse(stock_code=stock_code, interval="1d", data=data)
 
-    # 3) DB 데이터 부족 → yfinance 직접 수집
+    # DB 데이터 없으면 yfinance 직접 수집
     if _is_code(stock_code):
         ticker_code = stock_code
     else:
@@ -408,20 +770,18 @@ async def get_candles(
         if not _is_code(ticker_code):
             raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
 
+    fetch_days = days if days > 0 else 365
     ticker = ticker_code + ".KS"
-    buf_days = days + 70
-    start_str = (datetime.utcnow() - timedelta(days=buf_days)).strftime("%Y-%m-%d")
+    start_str = (datetime.utcnow() - timedelta(days=fetch_days + 70)).strftime("%Y-%m-%d")
     end_str = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
+    cutoff = datetime.utcnow() - timedelta(days=fetch_days) if days > 0 else None
 
     def _fetch():
         raw = yf.download(ticker, start=start_str, end=end_str, interval="1d", progress=False, auto_adjust=True)
         if raw.empty:
             return []
         if isinstance(raw.columns, pd.MultiIndex):
-            if raw.columns.nlevels == 2:
-                raw.columns = raw.columns.get_level_values(0)
-            else:
-                raw.columns = raw.columns.droplevel(-1)
+            raw.columns = raw.columns.get_level_values(0)
         raw.columns = [c.lower() for c in raw.columns]
         raw = raw.rename(columns={"adj close": "close"})
         raw.index = pd.to_datetime(raw.index)
@@ -430,10 +790,9 @@ async def get_candles(
         ma5 = close.rolling(5).mean()
         ma20 = close.rolling(20).mean()
         ma60 = close.rolling(60).mean()
-        cutoff = datetime.utcnow() - timedelta(days=days)
         result = []
         for dt, row in raw.iterrows():
-            if dt.replace(tzinfo=None) < cutoff:
+            if cutoff and dt.replace(tzinfo=None) < cutoff:
                 continue
             result.append(CandleDataPoint(
                 datetime=dt.strftime("%Y-%m-%d"),
@@ -458,3 +817,39 @@ async def get_candles(
         raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
 
     return CandleResponse(stock_code=stock_code, interval="1d", data=data)
+
+
+@router.get("/chart/candle5m/{stock_code}", response_model=CandleResponse, summary="5분봉 차트 데이터")
+async def get_candles_5m(
+    stock_code: str,
+    days: int = Query(1, ge=1, le=90),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """candles_5m 컬렉션에서 5분봉 데이터 조회. days 기본값 1 (오늘 하루)."""
+    from datetime import timezone as tz
+    since = datetime.utcnow() - timedelta(days=days)
+    cursor = db.candles_5m.find(
+        {"stock_code": stock_code, "datetime": {"$gte": since}},
+        {"_id": 0, "datetime": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+    ).sort("datetime", 1)
+    docs = [doc async for doc in cursor]
+    if not docs:
+        raise HTTPException(status_code=404, detail="5분봉 데이터가 없습니다.")
+
+    data = []
+    for d in docs:
+        dt = d["datetime"]
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tz.utc)
+        kst = dt + timedelta(hours=9)
+        dt_str = kst.strftime("%Y-%m-%d %H:%M")
+        data.append(CandleDataPoint(
+            datetime=dt_str,
+            open=_safe_float(d.get("open")),
+            high=_safe_float(d.get("high")),
+            low=_safe_float(d.get("low")),
+            close=_safe_float(d.get("close")),
+            volume=_safe_float(d.get("volume")),
+        ))
+    return CandleResponse(stock_code=stock_code, interval="5m", data=data)
