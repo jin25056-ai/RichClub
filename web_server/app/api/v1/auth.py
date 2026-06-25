@@ -52,6 +52,35 @@ async def verify_email_code(body: VerifyRequest, db: AsyncIOMotorDatabase = Depe
     return {"message": "이메일 인증이 완료되었습니다."}
 
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str
+
+
+@router.post("/password/reset", status_code=200, summary="비밀번호 재설정")
+async def reset_password(
+    body: PasswordResetRequest,
+    db: AsyncIOMotorDatabase = Depends(db_dep)
+):
+    """이메일 인증 완료 후 비밀번호 변경"""
+    ok = await verify_code(db, body.email, body.code)
+    if not ok:
+        raise HTTPException(status_code=400, detail="인증코드가 올바르지 않거나 만료되었습니다.")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="비밀번호는 최소 8자 이상이어야 합니다.")
+
+    from app.core.security import hash_password
+    hashed = hash_password(body.new_password)
+    result = await db.users.update_one(
+        {"email": body.email},
+        {"$set": {"password": hashed}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="가입된 이메일이 아닙니다.")
+    return {"message": "비밀번호가 변경되었습니다."}
+
+
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def signup(body: UserCreate, response: Response, db: AsyncIOMotorDatabase = Depends(db_dep)):
     """회원가입 - 이메일 인증 완료 후 가입 가능"""
