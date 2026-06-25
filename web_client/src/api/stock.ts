@@ -134,6 +134,17 @@ export const stockApi = {
       macd_bull: boolean | null; close: number | null;
     }[]>('/api/v1/stock/indicator-signals'),
 
+  getNews: (query?: string) =>
+    apiClient.get<{
+      items: {
+        title: string;
+        originallink: string;
+        link: string;
+        description: string;
+        pubDate: string;
+      }[];
+    }>('/api/v1/news', { params: { query: query ?? '주식 증권', display: 20 } }),
+
   getTodaySignals: (days = 1) =>
     apiClient.get<{
       stock_code: string; stock_name: string;
