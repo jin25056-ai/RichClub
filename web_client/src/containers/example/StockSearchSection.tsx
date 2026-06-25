@@ -538,6 +538,15 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     else fetchAll(selected.stock_code, selected.stock_name, externalPeriod ?? period);
   };
 
+  // 5분봉 선택 시 5분마다 자동 갱신
+  useEffect(() => {
+    if (chartInterval !== '5m' || !selected) return;
+    const timer = setInterval(() => {
+      fetch5m(selected.stock_code);
+    }, 5 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [chartInterval, selected?.stock_code]);
+
   const handleSelect = (item: StockItem) => {
     skipSearch.current = true;
     setSelected(item); setResults([]); setShowDropdown(false);
@@ -555,11 +564,13 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
   );
 
   const [visPMin, visPMax] = React.useMemo(() => {
-    const prices = visData.flatMap((d: any) =>
-      [d.high, d.low, d.ma5, d.ma20, d.ma60, d.tenkan, d.kijun, d.spanA, d.spanB].filter((v: any) => v != null && !isNaN(v))
-    );
+    const prices = chartInterval === '5m'
+      ? visData.flatMap((d: any) => [d.high, d.low].filter((v: any) => v != null && !isNaN(v)))
+      : visData.flatMap((d: any) =>
+          [d.high, d.low, d.ma5, d.ma20, d.ma60, d.tenkan, d.kijun, d.spanA, d.spanB].filter((v: any) => v != null && !isNaN(v))
+        );
     return prices.length ? [Math.min(...prices) * 0.997, Math.max(...prices) * 1.003] : [0, 100];
-  }, [visData]);
+  }, [visData, chartInterval]);
 
   const CandleShape = makeCandleShape(visPMin, visPMax);
 
@@ -593,21 +604,36 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
 
   return (
     <div>
-      {/* 일봉 / 5분봉 토글 */}
+      {/* 인터벌 토글 */}
       {selected && (
-        <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-          {(['1d', '5m'] as ChartInterval[]).map((iv) => (
-            <button key={iv} onClick={() => handleIntervalToggle(iv)}
-              style={{
-                padding: '2px 10px', fontSize: 11, borderRadius: 4, border: 'none', cursor: 'pointer',
-                background: chartInterval === iv ? '#6366f1' : '#1e1e2e',
-                color: chartInterval === iv ? '#fff' : '#888',
-              }}>
-              {iv === '1d' ? '일봉' : '5분봉'}
-            </button>
-          ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <div style={{
+            display: 'inline-flex',
+            background: '#0d0d1a',
+            border: '1px solid #2a2a3d',
+            borderRadius: 4,
+            overflow: 'hidden',
+          }}>
+            {([['1d', '일봉'], ['5m', '5분']] as [ChartInterval, string][]).map(([iv, label]) => (
+              <button key={iv} onClick={() => handleIntervalToggle(iv)}
+                style={{
+                  padding: '3px 10px',
+                  fontSize: 11,
+                  fontWeight: chartInterval === iv ? 600 : 400,
+                  border: 'none',
+                  borderRight: iv === '1d' ? '1px solid #2a2a3d' : 'none',
+                  cursor: 'pointer',
+                  background: chartInterval === iv ? '#1e1e35' : 'transparent',
+                  color: chartInterval === iv ? '#a5b4fc' : '#555',
+                  letterSpacing: '0.02em',
+                  transition: 'color 0.15s, background 0.15s',
+                }}>
+                {label}
+              </button>
+            ))}
+          </div>
           {chartInterval === '5m' && (
-            <span style={{ fontSize: 10, color: '#6b7280', alignSelf: 'center', marginLeft: 4 }}>오늘 장중 데이터</span>
+            <span style={{ fontSize: 9, color: '#374151', letterSpacing: '0.03em' }}>LIVE · 5min</span>
           )}
         </div>
       )}
