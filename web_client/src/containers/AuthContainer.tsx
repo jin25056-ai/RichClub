@@ -4,7 +4,7 @@ import { AuthFormValues } from '../types';
 import { login, signup } from '../api';
 import apiClient from '../api/client';
 
-type AuthMode = 'login' | 'signup' | 'reset';
+type AuthMode = 'login' | 'signup';
 type VerifyStep = 'input' | 'sent' | 'verified';
 
 const parseErrorMessage = (err: any): string => {
@@ -164,8 +164,10 @@ const AuthContainer: React.FC = () => {
     if (expireRef.current) clearInterval(expireRef.current);
   }, []);
 
+  const [showReset, setShowReset] = useState(false);
+
   const handleReset = () => {
-    setMode('login'); setError(null);
+    setShowReset(false); setError(null);
     setResetStep('email'); setResetEmail(''); setResetCode('');
     setResetNewPw(''); setResetError(null);
     if (resetExpireRef.current) clearInterval(resetExpireRef.current);
@@ -208,7 +210,7 @@ const AuthContainer: React.FC = () => {
     try {
       await apiClient.post('/api/v1/auth/password/reset', { email: resetEmail, code: resetCode, new_password: resetNewPw });
       handleReset();
-      setError('비밀번호가 변경되었습니다. 다시 로그인해 주세요.');
+      setError('비밀번호가 변경되었습니다.');
     } catch (err: any) {
       setResetError(err?.response?.data?.detail ?? '변경에 실패했습니다.');
     }
@@ -337,23 +339,23 @@ const AuthContainer: React.FC = () => {
           border: '1px solid rgba(255,255,255,0.07)',
           borderRadius: 10, padding: 3, marginBottom: 24,
         }}>
-          {(['login', 'signup', 'reset'] as AuthMode[]).map((m) => (
+          {(['login', 'signup'] as AuthMode[]).map((m) => (
             <button key={m} onClick={() => { setMode(m); setError(null); setVerifyStep('input'); setVerifyCode(''); }}
               style={{
-                flex: 1, padding: '8px 0', fontSize: 12, fontWeight: mode === m ? 700 : 500,
+                flex: 1, padding: '8px 0', fontSize: 13, fontWeight: mode === m ? 700 : 500,
                 borderRadius: 8, border: 'none', cursor: 'pointer',
                 background: mode === m ? 'rgba(99,102,241,0.25)' : 'transparent',
                 color: mode === m ? '#a5b4fc' : '#4b5563',
                 boxShadow: mode === m ? '0 0 0 1px rgba(99,102,241,0.3)' : 'none',
                 transition: 'all 0.2s',
               }}>
-              {m === 'login' ? '로그인' : m === 'signup' ? '회원가입' : '비밀번호 찾기'}
+              {m === 'login' ? '로그인' : '회원가입'}
             </button>
           ))}
         </div>
 
         {/* 로그인 / 회원가입 폼 */}
-        {mode !== 'reset' && (
+        {!showReset && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {mode === 'signup' && (
             <input style={inputStyle} type="text" name="name" placeholder="이름"
@@ -452,13 +454,25 @@ const AuthContainer: React.FC = () => {
             disabled={loading}
             variant="ghost"
           />
+          {mode === 'login' && (
+            <p onClick={() => { setShowReset(true); setResetStep('email'); setResetEmail(''); setResetCode(''); setResetNewPw(''); setResetError(null); }}
+              style={{ margin: '2px 0 0', fontSize: 12, color: '#374151', textAlign: 'center', cursor: 'pointer' }}>
+              비밀번호를 잊으셨나요?
+            </p>
+          )}
         </div>
         )}
 
         {/* 비밀번호 찾기 */}
-        {(mode as string) === 'reset' && (
+        {showReset && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {error && <p style={{ margin: 0, fontSize: 12, color: '#818cf8' }}>{error}</p>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <button onClick={handleReset}
+                style={{ background: 'none', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 16, padding: 0, lineHeight: 1 }}>
+                ←
+              </button>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#9ca3af' }}>비밀번호 재설정</span>
+            </div>
             {resetStep === 'email' && (
               <>
                 <input style={inputStyle} type="email" placeholder="가입한 이메일"
