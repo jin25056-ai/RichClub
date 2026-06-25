@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import GlobalMarketSection from '../containers/example/GlobalMarketSection';
 import AIPredictionsSection from '../containers/example/AIPredictionsSection';
 import StockSearchSection from '../containers/example/StockSearchSection';
@@ -9,15 +9,18 @@ import '../styles/example.css';
 
 type Period = '1m' | '3m' | '6m';
 type Tab = 'chart' | 'ai' | 'market' | 'winrate';
+type ChartInterval = '1d' | '5m';
 
 const isMobile = () => window.innerWidth <= 768;
 
 const ExamplePage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [selectedStock, setSelectedStock] = useState<{ code: string; name: string } | null>(null);
   const [currentName, setCurrentName] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period>('3m');
   const [sellMode, setSellMode] = useState<'ai' | 'simple'>('ai');
+  const [chartInterval, setChartInterval] = useState<ChartInterval>('1d');
   const [marketUpdatedAt, setMarketUpdatedAt] = useState<string | null>(null);
   const [mobile, setMobile] = useState(isMobile());
   const [activeTab, setActiveTab] = useState<Tab>('chart');
@@ -27,13 +30,27 @@ const ExamplePage: React.FC = () => {
       navigate('/auth');
       return;
     }
-    stockApi.getPredictions('매수', 1).then((res) => {
-      if (res.data.length > 0) {
-        const first = res.data[0];
-        setSelectedStock({ code: first.stock_code, name: first.stock_name });
-        setCurrentName(first.stock_name);
-      }
-    }).catch(() => {});
+    // URL 쿼리 파라미터에서 code 읽기
+    const params = new URLSearchParams(location.search);
+    const code = params.get('code');
+    if (code) {
+      // DB에서 종목명 조회
+      stockApi.search(code).then((res) => {
+        const found = res.data.find((s: any) => s.stock_code === code);
+        if (found) {
+          setSelectedStock({ code: found.stock_code, name: found.stock_name });
+          setCurrentName(found.stock_name);
+        }
+      }).catch(() => {});
+    } else {
+      stockApi.getPredictions('매수', 1).then((res) => {
+        if (res.data.length > 0) {
+          const first = res.data[0];
+          setSelectedStock({ code: first.stock_code, name: first.stock_name });
+          setCurrentName(first.stock_name);
+        }
+      }).catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -46,6 +63,10 @@ const ExamplePage: React.FC = () => {
     setSelectedStock({ code, name });
     setCurrentName(name);
     if (mobile) setActiveTab('chart');
+    // URL 업데이트 (새로고침 시 유지)
+    const params = new URLSearchParams(location.search);
+    params.set('code', code);
+    navigate(`?${params.toString()}`, { replace: true });
   };
 
   const TABS: { key: Tab; label: string }[] = [
@@ -55,10 +76,36 @@ const ExamplePage: React.FC = () => {
     { key: 'winrate', label: '승률' },
   ];
 
-  // 공통 패널 스타일
   const panel = { background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px' };
 
-  // 상단 헤더
+  const intervalToggle = selectedStock ? (
+    <div style={{
+      display: 'inline-flex',
+      background: '#0d0d1a',
+      border: '1px solid #2a2a3d',
+      borderRadius: 4,
+      overflow: 'hidden',
+      marginLeft: 4,
+    }}>
+      {([['1d', '일봉'], ['5m', '5분']] as [ChartInterval, string][]).map(([iv, label]) => (
+        <button key={iv} onClick={() => setChartInterval(iv as ChartInterval)}
+          style={{
+            padding: '3px 10px',
+            fontSize: 11,
+            fontWeight: chartInterval === iv ? 600 : 400,
+            border: 'none',
+            borderRight: iv === '1d' ? '1px solid #2a2a3d' : 'none',
+            cursor: 'pointer',
+            background: chartInterval === iv ? '#1e1e35' : 'transparent',
+            color: chartInterval === iv ? '#a5b4fc' : '#555',
+            letterSpacing: '0.02em',
+          }}>
+          {label}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0, flexWrap: 'wrap' }}>
       <h1 style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', margin: 0, flexShrink: 0 }}>RichClub AI</h1>
@@ -67,6 +114,13 @@ const ExamplePage: React.FC = () => {
         <button key={p} onClick={() => setPeriod(p)}
           style={{ padding: '4px 10px', fontSize: 11, borderRadius: 5, border: 'none', cursor: 'pointer', background: period === p ? '#6366f1' : '#1e1e2e', color: period === p ? '#fff' : '#888' }}>{p}</button>
       ))}
+      {!mobile && chartInterval === '1d' && intervalToggle}
+      {!mobile && chartInterval === '5m' && (
+        <>
+          {intervalToggle}
+          <span style={{ fontSize: 9, color: '#374151', letterSpacing: '0.03em' }}>LIVE · 5min</span>
+        </>
+      )}
       {currentName && (
         <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 600 }}>
           — {currentName}
@@ -85,24 +139,22 @@ const ExamplePage: React.FC = () => {
   if (mobile) {
     return (
       <div style={{ background: '#0a0a14', minHeight: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}>
-        {/* 헤더 */}
         <div style={{ padding: '10px 12px 0', flexShrink: 0 }}>{header}</div>
 
-        {/* 기간 선택 (모바일) */}
         {activeTab === 'chart' && (
-          <div style={{ display: 'flex', gap: 6, padding: '0 12px 8px' }}>
+          <div style={{ display: 'flex', gap: 6, padding: '0 12px 8px', alignItems: 'center' }}>
             {(['1m', '3m', '6m'] as Period[]).map((p) => (
               <button key={p} onClick={() => setPeriod(p)}
                 style={{ padding: '3px 10px', fontSize: 11, borderRadius: 5, border: 'none', cursor: 'pointer', background: period === p ? '#6366f1' : '#1e1e2e', color: period === p ? '#fff' : '#888' }}>{p}</button>
             ))}
+            {intervalToggle}
           </div>
         )}
 
-        {/* 탭 콘텐츠 */}
         <div style={{ flex: 1, padding: '0 12px', overflow: 'hidden' }}>
           {activeTab === 'chart' && (
             <div style={{ ...panel, height: 'calc(100vh - 130px)', overflow: 'hidden' }}>
-              <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} />
+              <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} />
             </div>
           )}
           {activeTab === 'ai' && (
@@ -128,7 +180,6 @@ const ExamplePage: React.FC = () => {
           )}
         </div>
 
-        {/* 하단 탭 바 */}
         <div style={{ display: 'flex', borderTop: '1px solid #1e1e2e', background: '#0a0a14', flexShrink: 0 }}>
           {TABS.map(({ key, label }) => (
             <button key={key} onClick={() => setActiveTab(key)}
@@ -144,7 +195,6 @@ const ExamplePage: React.FC = () => {
     );
   }
 
-  // 데스크탑 레이아웃
   return (
     <div style={{ background: '#0a0a14', height: '100vh', overflow: 'hidden', padding: '10px 14px', fontFamily: 'inherit', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
       {header}
@@ -172,7 +222,7 @@ const ExamplePage: React.FC = () => {
         </div>
 
         <div style={{ flex: 1, minWidth: 0, ...panel, overflow: 'hidden' }}>
-          <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} />
+          <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} />
         </div>
 
         <div style={{ width: 195, flexShrink: 0, ...panel, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
