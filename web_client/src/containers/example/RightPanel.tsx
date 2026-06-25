@@ -109,9 +109,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
               borderBottom: tab === t ? '2px solid #6366f1' : '2px solid transparent',
             }}>
             {t === 'ai' ? 'AI 예측' : '관심종목'}
-            {t === 'watchlist' && watchlist.length > 0 && (
-              <span style={{ marginLeft: 4, fontSize: 9, color: '#6366f1' }}>{watchlist.length}</span>
-            )}
           </button>
         ))}
       </div>
