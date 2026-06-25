@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import GlobalMarketSection from '../containers/example/GlobalMarketSection';
 import RightPanel from '../containers/example/RightPanel';
+import TradeModal from '../containers/example/TradeModal';
 import StockSearchSection from '../containers/example/StockSearchSection';
 import WinRateSection from '../containers/example/WinRateSection';
 import { stockApi, watchlistApi } from '../api/stock';
@@ -24,7 +25,8 @@ const ExamplePage: React.FC = () => {
   const [marketUpdatedAt, setMarketUpdatedAt] = useState<string | null>(null);
   const [mobile, setMobile] = useState(isMobile());
   const [activeTab, setActiveTab] = useState<Tab>('chart');
-  const [watchId, setWatchId] = useState<string | null>(null); // 현재 종목 관심 여부
+  const [watchId, setWatchId] = useState<string | null>(null);
+  const [tradeModalOpen, setTradeModalOpen] = useState(false); // 현재 종목 관심 여부
 
   useEffect(() => {
     if (!localStorage.getItem('access_token')) {
@@ -156,7 +158,7 @@ const ExamplePage: React.FC = () => {
         </span>
       )}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-        <button onClick={() => navigate('/trade')}
+        <button onClick={() => setTradeModalOpen(true)}
           style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#a5b4fc', border: '1px solid #3730a3', borderRadius: 4, cursor: 'pointer' }}>
           매매일지
         </button>
@@ -229,6 +231,12 @@ const ExamplePage: React.FC = () => {
   return (
     <div style={{ background: '#0a0a14', height: '100vh', overflow: 'hidden', padding: '10px 14px', fontFamily: 'inherit', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
       {header}
+      <TradeModal
+        isOpen={tradeModalOpen}
+        onClose={() => setTradeModalOpen(false)}
+        initialStockCode={selectedStock?.code}
+        initialStockName={selectedStock?.name}
+      />
       <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
         <div style={{ width: 190, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
           <div style={panel}>
