@@ -6,7 +6,6 @@ const fmt = (n: number) => Math.round(n).toLocaleString();
 const fmtDateFull = (s: string) =>
   s ? new Date(s).toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' }) : '';
 
-// 매수-매도 매칭 손익 계산
 const calcPnL = (logs: TradeLogItem[]) => {
   const groups: Record<string, { buys: TradeLogItem[]; sells: TradeLogItem[] }> = {};
   for (const log of logs) {
@@ -20,11 +19,10 @@ const calcPnL = (logs: TradeLogItem[]) => {
     const totalSellQty = sells.reduce((s, b) => s + b.quantity, 0);
     const avgBuy = totalBuyQty > 0 ? buys.reduce((s, b) => s + b.total_amount, 0) / totalBuyQty : 0;
     const realized = sells.reduce((s, b) => s + b.total_amount, 0) - avgBuy * totalSellQty;
-    return { code, name, holding: totalBuyQty - totalSellQty, avgBuy, realized, logs: [...buys, ...sells].sort((a, b) => new Date(a.traded_at).getTime() - new Date(b.traded_at).getTime()) };
+    return { code, name, holding: totalBuyQty - totalSellQty, avgBuy, realized };
   });
 };
 
-// CSV 내보내기
 const exportCSV = (logs: TradeLogItem[]) => {
   const header = ['날짜', '종목명', '종목코드', '구분', '가격', '수량', '총액', '메모'];
   const rows = logs.map((l) => [
@@ -40,6 +38,13 @@ const exportCSV = (logs: TradeLogItem[]) => {
   a.click(); URL.revokeObjectURL(url);
 };
 
+interface EditState {
+  id: string;
+  price: string;
+  quantity: string;
+  memo: string;
+}
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -51,7 +56,9 @@ interface Props {
 const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initialStockName, initialPrice }) => {
   const navigate = useNavigate();
   const [logs, setLogs] = useState<TradeLogItem[]>([]);
+  const [trash, setTrash] = useState<TradeLogItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [rightTab, setRightTab] = useState<'logs' | 'trash'>('logs');
 
   // 폼 상태
   const [query, setQuery] = useState('');
@@ -62,16 +69,22 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
   const [quantity, setQuantity] = useState('');
   const [memo, setMemo] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState<'form' | 'list'>('form');
+
+  // 인라인 수정 상태
+  const [editState, setEditState] = useState<EditState | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const totalAmount = price && quantity ? Math.round(Number(price) * Number(quantity)) : 0;
   const pnlGroups = useMemo(() => calcPnL(logs), [logs]);
   const totalRealized = pnlGroups.reduce((s, g) => s + g.realized, 0);
 
-  // 모달 열릴 때 현재 종목/가격 자동 입력
+  const overlayRef = React.useRef<HTMLDivElement>(null);
+  const mouseDownTarget = React.useRef<EventTarget | null>(null);
+
   useEffect(() => {
     if (!isOpen) return;
     fetchLogs();
+    fetchTrash();
     if (initialStockCode && initialStockName) {
       setSelectedStock({ stock_code: initialStockCode, stock_name: initialStockName });
       setQuery('');
@@ -92,6 +105,10 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
     tradeLogApi.get().then((r) => setLogs(r.data)).finally(() => setLoading(false));
   };
 
+  const fetchTrash = () => {
+    tradeLogApi.getTrash().then((r) => setTrash(r.data)).catch(() => {});
+  };
+
   const handleSubmit = async () => {
     if (!selectedStock || !price || !quantity) return;
     setSubmitting(true);
@@ -106,26 +123,67 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
       });
       setPrice(''); setQuantity(''); setMemo('');
       fetchLogs();
-      setActiveTab('list');
+      setRightTab('logs');
     } finally {
       setSubmitting(false);
     }
   };
 
+  // 휴지통으로 이동
   const handleDelete = async (id: string) => {
     await tradeLogApi.remove(id);
-    setLogs((prev) => prev.filter((l) => l.id !== id));
+    setLogs((prev) => {
+      const moved = prev.find((l) => l.id === id);
+      if (moved) setTrash((t) => [moved, ...t]);
+      return prev.filter((l) => l.id !== id);
+    });
   };
 
-  const overlayRef = React.useRef<HTMLDivElement>(null);
-  const mouseDownTarget = React.useRef<EventTarget | null>(null);
+  // 복구
+  const handleRestore = async (id: string) => {
+    const res = await tradeLogApi.restore(id);
+    setTrash((prev) => prev.filter((l) => l.id !== id));
+    setLogs((prev) => [res.data, ...prev]);
+  };
+
+  // 영구 삭제
+  const handlePermanentDelete = async (id: string) => {
+    if (!window.confirm('영구 삭제하시겠습니까? 복구할 수 없습니다.')) return;
+    await tradeLogApi.permanentDelete(id);
+    setTrash((prev) => prev.filter((l) => l.id !== id));
+  };
+
+  // 수정 시작
+  const startEdit = (log: TradeLogItem) => {
+    setEditState({ id: log.id, price: String(log.price), quantity: String(log.quantity), memo: log.memo ?? '' });
+  };
+
+  // 수정 저장
+  const saveEdit = async () => {
+    if (!editState) return;
+    setSaving(true);
+    try {
+      const res = await tradeLogApi.update(editState.id, {
+        price: Number(editState.price),
+        quantity: Number(editState.quantity),
+        memo: editState.memo,
+      });
+      setLogs((prev) => prev.map((l) => l.id === editState.id ? res.data : l));
+      setEditState(null);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (!isOpen) return null;
 
   const input: React.CSSProperties = {
     width: '100%', background: '#0a0a14', border: '1px solid #2d2d3d', borderRadius: 6,
-    color: '#e2e8f0', fontSize: 12, padding: '7px 10px', boxSizing: 'border-box',
-    outline: 'none',
+    color: '#e2e8f0', fontSize: 12, padding: '7px 10px', boxSizing: 'border-box', outline: 'none',
+  };
+  const inlineInput: React.CSSProperties = {
+    background: '#0a0a14', border: '1px solid #3730a3', borderRadius: 4,
+    color: '#e2e8f0', fontSize: 11, padding: '3px 6px', outline: 'none', width: '80px',
   };
   const lbl: React.CSSProperties = { fontSize: 10, color: '#6b7280', marginBottom: 3, display: 'block' };
 
@@ -134,8 +192,6 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
       ref={overlayRef}
       onMouseDown={(e) => { mouseDownTarget.current = e.target; }}
       onClick={(e) => {
-        // 드래그로 모달 밖에서 mouseup 됐을 때 닫히지 않도록
-        // mousedown 시작이 오버레이 자체일 때만 닫기
         if (e.target === overlayRef.current && mouseDownTarget.current === overlayRef.current) onClose();
       }}
       style={{
@@ -147,7 +203,7 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
         onClick={(e) => e.stopPropagation()}
         style={{
           background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 12,
-          width: 720, maxWidth: '95vw', maxHeight: '88vh',
+          width: 760, maxWidth: '95vw', maxHeight: '88vh',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
           boxShadow: '0 24px 64px rgba(0,0,0,0.8)',
         }}
@@ -183,7 +239,6 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           {/* 좌측 - 입력 폼 */}
           <div style={{ width: 240, flexShrink: 0, padding: '16px', borderRight: '1px solid #1e1e2e', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
-            {/* 매수/매도 토글 */}
             <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: '1px solid #2d2d3d' }}>
               {(['buy', 'sell'] as const).map((t) => (
                 <button key={t} onClick={() => setTradeType(t)}
@@ -197,7 +252,6 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
               ))}
             </div>
 
-            {/* 종목 */}
             <div style={{ position: 'relative' }}>
               <label style={lbl}>종목</label>
               {selectedStock ? (
@@ -217,7 +271,13 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
                     }}>
                       {searchResults.map((r) => (
                         <div key={r.stock_code}
-                          onClick={() => { setSelectedStock(r); setQuery(''); setSearchResults([]); }}
+                          onClick={async () => {
+                            setSelectedStock(r); setQuery(''); setSearchResults([]);
+                            try {
+                              const res = await stockApi.getPrice(r.stock_code);
+                              if (res.data.close) setPrice(String(Math.round(res.data.close)));
+                            } catch {}
+                          }}
                           style={{ padding: '7px 10px', cursor: 'pointer', fontSize: 11, borderBottom: '1px solid #1e1e2e' }}
                           onMouseEnter={(e) => (e.currentTarget.style.background = '#2d2d3d')}
                           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
@@ -231,29 +291,20 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
               )}
             </div>
 
-            {/* 가격 */}
-            <div>
-              <label style={lbl}>가격 (원)</label>
-              <input style={input} type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0" />
-            </div>
-
-            {/* 수량 */}
-            <div>
-              <label style={lbl}>수량 (주)</label>
-              <input style={input} type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
-            </div>
-
-            {/* 총액 */}
-            {totalAmount > 0 && (
-              <div style={{ padding: '7px 10px', background: '#1e1e2e', borderRadius: 6, fontSize: 11 }}>
-                <span style={{ color: '#6b7280' }}>총액</span>
-                <span style={{ float: 'right', fontWeight: 600, color: tradeType === 'buy' ? '#4ade80' : '#f87171' }}>
-                  {fmt(totalAmount)}원
-                </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={lbl}>가격 (원)</label>
+                <input style={input} type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0" />
               </div>
-            )}
+              <div style={{ flex: 1 }}>
+                <label style={lbl}>수량 (주)</label>
+                <input style={input} type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: totalAmount > 0 ? (tradeType === 'buy' ? '#4ade80' : '#f87171') : 'transparent', textAlign: 'right', minHeight: 16 }}>
+              {totalAmount > 0 ? `총액 ${fmt(totalAmount)}원` : '.'}
+            </div>
 
-            {/* 메모 */}
             <div>
               <label style={lbl}>메모 (선택)</label>
               <textarea style={{ ...input, resize: 'none', height: 56 } as React.CSSProperties}
@@ -272,17 +323,37 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
             </button>
           </div>
 
-          {/* 우측 - 매매 내역 */}
+          {/* 우측 */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+            {/* 탭 */}
+            <div style={{ display: 'flex', borderBottom: '1px solid #1e1e2e', flexShrink: 0 }}>
+              <button onClick={() => setRightTab('logs')}
+                style={{
+                  padding: '8px 16px', fontSize: 11, border: 'none', cursor: 'pointer', background: 'transparent',
+                  color: rightTab === 'logs' ? '#a5b4fc' : '#555', fontWeight: rightTab === 'logs' ? 600 : 400,
+                  borderBottom: rightTab === 'logs' ? '2px solid #6366f1' : '2px solid transparent',
+                }}>
+                매매 내역 {logs.length > 0 && <span style={{ fontSize: 9, color: '#6366f1' }}>{logs.length}</span>}
+              </button>
+              <button onClick={() => setRightTab('trash')}
+                style={{
+                  padding: '8px 16px', fontSize: 11, border: 'none', cursor: 'pointer', background: 'transparent',
+                  color: rightTab === 'trash' ? '#f87171' : '#555', fontWeight: rightTab === 'trash' ? 600 : 400,
+                  borderBottom: rightTab === 'trash' ? '2px solid #dc2626' : '2px solid transparent',
+                }}>
+                휴지통 {trash.length > 0 && <span style={{ fontSize: 9, color: '#dc2626' }}>{trash.length}</span>}
+              </button>
+            </div>
+
             {/* 보유 포지션 요약 */}
-            {pnlGroups.filter((g) => g.holding > 0).length > 0 && (
-              <div style={{ padding: '10px 14px', borderBottom: '1px solid #1e1e2e', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {rightTab === 'logs' && pnlGroups.filter((g) => g.holding > 0).length > 0 && (
+              <div style={{ padding: '8px 14px', borderBottom: '1px solid #1e1e2e', display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0 }}>
                 {pnlGroups.filter((g) => g.holding > 0).map((g) => (
-                  <div key={g.code} style={{ background: '#1e1e2e', borderRadius: 6, padding: '5px 10px', fontSize: 10 }}>
+                  <div key={g.code} style={{ background: '#1e1e2e', borderRadius: 6, padding: '4px 8px', fontSize: 10 }}>
                     <span style={{ color: '#a5b4fc', fontWeight: 600 }}>{g.name}</span>
-                    <span style={{ color: '#6b7280', marginLeft: 5 }}>{g.holding}주 · 평균 {fmt(g.avgBuy)}원</span>
+                    <span style={{ color: '#6b7280', marginLeft: 4 }}>{g.holding}주 · 평균 {fmt(g.avgBuy)}원</span>
                     {g.realized !== 0 && (
-                      <span style={{ marginLeft: 5, color: g.realized > 0 ? '#4ade80' : '#f87171', fontWeight: 600 }}>
+                      <span style={{ marginLeft: 4, color: g.realized > 0 ? '#4ade80' : '#f87171', fontWeight: 600 }}>
                         {g.realized > 0 ? '+' : ''}{fmt(g.realized)}원
                       </span>
                     )}
@@ -291,53 +362,152 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
               </div>
             )}
 
-            {/* 매매 내역 테이블 */}
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              {loading ? (
-                <div style={{ padding: 20, fontSize: 12, color: '#6b7280', textAlign: 'center' }}>불러오는 중...</div>
-              ) : logs.length === 0 ? (
-                <div style={{ padding: 40, fontSize: 12, color: '#4b5563', textAlign: 'center' }}>
-                  매매 기록이 없습니다.<br />왼쪽에서 거래를 추가하세요.
-                </div>
-              ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                  <thead style={{ position: 'sticky', top: 0, background: '#0f0f1a', zIndex: 1 }}>
-                    <tr style={{ borderBottom: '1px solid #1e1e2e' }}>
-                      {['날짜', '종목', '구분', '가격', '수량', '총액', '메모', ''].map((h) => (
-                        <th key={h} style={{ padding: '8px 10px', textAlign: 'left', color: '#6b7280', fontWeight: 500, whiteSpace: 'nowrap' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {logs.map((log) => (
-                      <tr key={log.id} style={{ borderBottom: '1px solid #13131e' }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = '#151525')}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
-                        <td style={{ padding: '7px 10px', color: '#6b7280', whiteSpace: 'nowrap' }}>{fmtDateFull(log.traded_at)}</td>
-                        <td style={{ padding: '7px 10px', fontWeight: 500, whiteSpace: 'nowrap' }}>{log.stock_name}</td>
-                        <td style={{ padding: '7px 10px' }}>
-                          <span style={{
-                            fontSize: 9, padding: '2px 5px', borderRadius: 3, fontWeight: 600,
-                            background: log.trade_type === 'buy' ? '#14532d' : '#7f1d1d',
-                            color: log.trade_type === 'buy' ? '#4ade80' : '#f87171',
-                          }}>
-                            {log.trade_type === 'buy' ? '매수' : '매도'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(log.price)}</td>
-                        <td style={{ padding: '7px 10px', textAlign: 'right' }}>{log.quantity}</td>
-                        <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>{fmt(log.total_amount)}</td>
-                        <td style={{ padding: '7px 10px', color: '#6b7280', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.memo || '-'}</td>
-                        <td style={{ padding: '7px 6px' }}>
-                          <button onClick={() => handleDelete(log.id)}
-                            style={{ background: 'none', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 13 }}>×</button>
-                        </td>
+            {/* 매매 내역 */}
+            {rightTab === 'logs' && (
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {loading ? (
+                  <div style={{ padding: 20, fontSize: 12, color: '#6b7280', textAlign: 'center' }}>불러오는 중...</div>
+                ) : logs.length === 0 ? (
+                  <div style={{ padding: 40, fontSize: 12, color: '#4b5563', textAlign: 'center' }}>
+                    매매 기록이 없습니다.<br />왼쪽에서 거래를 추가하세요.
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                    <thead style={{ position: 'sticky', top: 0, background: '#0f0f1a', zIndex: 1 }}>
+                      <tr style={{ borderBottom: '1px solid #1e1e2e' }}>
+                        {['날짜', '종목', '구분', '가격', '수량', '총액', '메모', ''].map((h) => (
+                          <th key={h} style={{ padding: '8px 8px', textAlign: 'left', color: '#6b7280', fontWeight: 500, whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+                    </thead>
+                    <tbody>
+                      {logs.map((log) => {
+                        const isEditing = editState?.id === log.id;
+                        return (
+                          <tr key={log.id} style={{ borderBottom: '1px solid #13131e' }}
+                            onMouseEnter={(e) => { if (!isEditing) e.currentTarget.style.background = '#151525'; }}
+                            onMouseLeave={(e) => { if (!isEditing) e.currentTarget.style.background = 'transparent'; }}>
+                            <td style={{ padding: '7px 8px', color: '#6b7280', whiteSpace: 'nowrap' }}>{fmtDateFull(log.traded_at)}</td>
+                            <td style={{ padding: '7px 8px', fontWeight: 500, whiteSpace: 'nowrap' }}>{log.stock_name}</td>
+                            <td style={{ padding: '7px 8px' }}>
+                              <span style={{
+                                fontSize: 9, padding: '2px 5px', borderRadius: 3, fontWeight: 600,
+                                background: log.trade_type === 'buy' ? '#14532d' : '#7f1d1d',
+                                color: log.trade_type === 'buy' ? '#4ade80' : '#f87171',
+                              }}>
+                                {log.trade_type === 'buy' ? '매수' : '매도'}
+                              </span>
+                            </td>
+                            {isEditing ? (
+                              <>
+                                <td style={{ padding: '4px 6px' }}>
+                                  <input style={inlineInput} type="number" value={editState.price}
+                                    onChange={(e) => setEditState({ ...editState, price: e.target.value })} />
+                                </td>
+                                <td style={{ padding: '4px 6px' }}>
+                                  <input style={{ ...inlineInput, width: 56 }} type="number" value={editState.quantity}
+                                    onChange={(e) => setEditState({ ...editState, quantity: e.target.value })} />
+                                </td>
+                                <td style={{ padding: '4px 6px', color: '#6b7280', fontSize: 10 }}>
+                                  {editState.price && editState.quantity
+                                    ? fmt(Math.round(Number(editState.price) * Number(editState.quantity)))
+                                    : '-'}
+                                </td>
+                                <td style={{ padding: '4px 6px' }}>
+                                  <input style={{ ...inlineInput, width: 100 }} value={editState.memo}
+                                    onChange={(e) => setEditState({ ...editState, memo: e.target.value })} />
+                                </td>
+                                <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                                  <button onClick={saveEdit} disabled={saving}
+                                    style={{ fontSize: 10, padding: '2px 6px', borderRadius: 3, border: 'none', cursor: 'pointer', background: '#6366f1', color: '#fff', marginRight: 3 }}>
+                                    {saving ? '...' : '저장'}
+                                  </button>
+                                  <button onClick={() => setEditState(null)}
+                                    style={{ fontSize: 10, padding: '2px 6px', borderRadius: 3, border: 'none', cursor: 'pointer', background: '#1e1e2e', color: '#888' }}>
+                                    취소
+                                  </button>
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td style={{ padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(log.price)}</td>
+                                <td style={{ padding: '7px 8px', textAlign: 'right' }}>{log.quantity}</td>
+                                <td style={{ padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>{fmt(log.total_amount)}</td>
+                                <td style={{ padding: '7px 8px', color: '#6b7280', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.memo || '-'}</td>
+                                <td style={{ padding: '7px 6px', whiteSpace: 'nowrap' }}>
+                                  <button onClick={() => startEdit(log)} title="수정"
+                                    style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 12, marginRight: 2 }}>
+                                    ✎
+                                  </button>
+                                  <button onClick={() => handleDelete(log.id)} title="휴지통으로"
+                                    style={{ background: 'none', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: 13 }}>
+                                    🗑
+                                  </button>
+                                </td>
+                              </>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {/* 휴지통 */}
+            {rightTab === 'trash' && (
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {trash.length === 0 ? (
+                  <div style={{ padding: 40, fontSize: 12, color: '#4b5563', textAlign: 'center' }}>
+                    휴지통이 비어있습니다.
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                    <thead style={{ position: 'sticky', top: 0, background: '#0f0f1a', zIndex: 1 }}>
+                      <tr style={{ borderBottom: '1px solid #1e1e2e' }}>
+                        {['날짜', '종목', '구분', '가격', '수량', '총액', '메모', ''].map((h) => (
+                          <th key={h} style={{ padding: '8px 8px', textAlign: 'left', color: '#6b7280', fontWeight: 500, whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trash.map((log) => (
+                        <tr key={log.id} style={{ borderBottom: '1px solid #13131e', opacity: 0.6 }}
+                          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = '#151525'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; e.currentTarget.style.background = 'transparent'; }}>
+                          <td style={{ padding: '7px 8px', color: '#6b7280', whiteSpace: 'nowrap' }}>{fmtDateFull(log.traded_at)}</td>
+                          <td style={{ padding: '7px 8px', fontWeight: 500, whiteSpace: 'nowrap' }}>{log.stock_name}</td>
+                          <td style={{ padding: '7px 8px' }}>
+                            <span style={{
+                              fontSize: 9, padding: '2px 5px', borderRadius: 3, fontWeight: 600,
+                              background: log.trade_type === 'buy' ? '#14532d' : '#7f1d1d',
+                              color: log.trade_type === 'buy' ? '#4ade80' : '#f87171',
+                            }}>
+                              {log.trade_type === 'buy' ? '매수' : '매도'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(log.price)}</td>
+                          <td style={{ padding: '7px 8px', textAlign: 'right' }}>{log.quantity}</td>
+                          <td style={{ padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(log.total_amount)}</td>
+                          <td style={{ padding: '7px 8px', color: '#6b7280', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.memo || '-'}</td>
+                          <td style={{ padding: '7px 6px', whiteSpace: 'nowrap' }}>
+                            <button onClick={() => handleRestore(log.id)} title="복구"
+                              style={{ fontSize: 10, padding: '2px 6px', borderRadius: 3, border: '1px solid #374151', cursor: 'pointer', background: 'transparent', color: '#9ca3af', marginRight: 4 }}>
+                              복구
+                            </button>
+                            <button onClick={() => handlePermanentDelete(log.id)} title="영구 삭제"
+                              style={{ background: 'none', border: 'none', color: '#7f1d1d', cursor: 'pointer', fontSize: 13 }}>
+                              ×
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
