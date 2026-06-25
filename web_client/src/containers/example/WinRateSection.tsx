@@ -25,10 +25,10 @@ const inputStyle: React.CSSProperties = {
 };
 
 const TABS: { key: TabType; label: string; desc: string }[] = [
-  { key: 'ai',        label: 'AI',      desc: '매수: AI 신호  /  매도: AI 신호' },
-  { key: 'simple',    label: '5일선',   desc: '매수: AI 신호  /  매도: 5일선 꺾임' },
-  { key: 'combined',  label: 'AI+지표', desc: '매수: AI + MA 정배열 동시  /  매도: AI or MA 역배열' },
-  { key: 'indicator', label: '지표',    desc: '매수: MA 정배열 진입  /  매도: MA 역배열 전환' },
+  { key: 'ai',        label: 'AI',      desc: '매수: AI + MA60 상승 / 매도: AI 신호  (침체구간제외)' },
+  { key: 'simple',    label: '5일선',   desc: '매수: AI + MA60 상승 / 매도: 5일선 꺾임  (침체구간제외)' },
+  { key: 'combined',  label: 'AI+지표', desc: '매수: AI + MA정배열 + MA60상승 / 매도: AI or MA역배열' },
+  { key: 'indicator', label: '지표',    desc: '매수: MA정배열+MA60상승 진입 / 매도: MA역배열' },
 ];
 
 const getApiFn = (t: TabType) => {

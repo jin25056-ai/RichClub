@@ -1,6 +1,5 @@
 import apiClient from './client';
 
-// 타입
 export interface AIPredictionItem {
   stock_code: string;
   stock_name: string;
@@ -24,20 +23,10 @@ export interface AIDetailResponse {
 }
 
 export interface RSIDataPoint { date: string; rsi: number; }
-export interface RSIResponse {
-  stock_code: string;
-  stock_name: string;
-  period: string;
-  data: RSIDataPoint[];
-}
+export interface RSIResponse { stock_code: string; stock_name: string; period: string; data: RSIDataPoint[]; }
 
 export interface MACDDataPoint { date: string; macd: number; signal: number; histogram: number; }
-export interface MACDResponse {
-  stock_code: string;
-  stock_name: string;
-  period: string;
-  data: MACDDataPoint[];
-}
+export interface MACDResponse { stock_code: string; stock_name: string; period: string; data: MACDDataPoint[]; }
 
 export interface CandleDataPoint {
   datetime: string;
@@ -57,40 +46,57 @@ export interface GlobalMarketResponse {
 }
 
 export interface TradeRecord {
-  buy_date: string;
-  buy_price: number;
-  sell_date: string | null;
-  sell_price: number | null;
-  return_pct: number | null;
-  unrealized_pct: number | null;
+  buy_date: string; buy_price: number;
+  sell_date: string | null; sell_price: number | null;
+  return_pct: number | null; unrealized_pct: number | null;
 }
-
 export interface WinRateResult {
-  signal: string;
-  total_signals: number;
-  win_count: number;
-  lose_count: number;
-  win_rate: number;
-  avg_return_pct: number;
-  max_return_pct: number;
-  max_loss_pct: number;
-  cumulative_return_pct: number;
-  unrealized_pct: number | null;
-  hold_days: number;
+  signal: string; total_signals: number; win_count: number; lose_count: number;
+  win_rate: number; avg_return_pct: number; max_return_pct: number;
+  max_loss_pct: number; cumulative_return_pct: number;
+  unrealized_pct: number | null; hold_days: number;
 }
 export interface WinRateResponse {
-  stock_code: string | null;
-  stock_name: string | null;
-  period: string;
-  results: WinRateResult[];
-  trades: TradeRecord[];
-  updated_at: string;
+  stock_code: string | null; stock_name: string | null; period: string;
+  results: WinRateResult[]; trades: TradeRecord[]; updated_at: string;
 }
 
 export interface StockItem { stock_code: string; stock_name: string; }
 export interface StockSearchResult { stock_code: string; stock_name: string; }
 
-// API 함수
+// 관심종목
+export interface WatchlistItem {
+  id: string;
+  stock_code: string;
+  stock_name: string;
+  memo: string | null;
+  added_at: string;
+  signal: string | null;
+  confidence: number | null;
+  current_price: number | null;
+}
+
+// 매매일지
+export interface TradeLogItem {
+  id: string;
+  stock_code: string;
+  stock_name: string;
+  trade_type: 'buy' | 'sell';
+  price: number;
+  quantity: number;
+  total_amount: number;
+  memo: string | null;
+  traded_at: string;
+}
+export interface TradeLogCreate {
+  stock_code: string;
+  stock_name: string;
+  trade_type: 'buy' | 'sell';
+  price: number;
+  quantity: number;
+  memo?: string;
+}
+
 export const stockApi = {
   search: (q: string) =>
     apiClient.get<StockItem[]>('/api/v1/stock/search', { params: { q } }),
@@ -101,21 +107,41 @@ export const stockApi = {
     }),
 
   getTodayPredictions: (signal?: string) =>
-    apiClient.get<AIPredictionItem[]>('/api/v1/stock/ai/today', {
-      params: { signal },
-    }),
+    apiClient.get<AIPredictionItem[]>('/api/v1/stock/ai/today', { params: { signal } }),
 
   getAIDetail: (stock_code: string) =>
     apiClient.get<AIDetailResponse>(`/api/v1/stock/ai/detail/${stock_code}`),
 
-  getRSI: (stock_code: string, period = '3m') =>
+  getRSI: (stock_code: string, period = 'all') =>
     apiClient.get<RSIResponse>(`/api/v1/stock/chart/rsi/${stock_code}`, { params: { period } }),
 
-  getMACD: (stock_code: string, period = '3m') =>
+  getMACD: (stock_code: string, period = 'all') =>
     apiClient.get<MACDResponse>(`/api/v1/stock/chart/macd/${stock_code}`, { params: { period } }),
 
-  getCandles: (stock_code: string, days = 1) =>
+  getCandles: (stock_code: string, days = 0) =>
     apiClient.get<CandleResponse>(`/api/v1/stock/chart/candle/${stock_code}`, { params: { days } }),
+
+  getCandles5m: (stock_code: string, days = 1) =>
+    apiClient.get<CandleResponse>(`/api/v1/stock/chart/candle5m/${stock_code}`, { params: { days } }),
+
+  getPrice: (stock_code: string) =>
+    apiClient.get<{ stock_code: string; stock_name: string; close: number; predicted_at: string }>(`/api/v1/stock/price/${stock_code}`),
+
+  getIndicatorSignals: () =>
+    apiClient.get<{
+      stock_code: string; stock_name: string; signal: string; score: number;
+      reasons: string[]; rsi: number | null; ma_align: string;
+      macd_bull: boolean | null; close: number | null;
+    }[]>('/api/v1/stock/indicator-signals'),
+
+  getTodaySignals: (days = 1) =>
+    apiClient.get<{
+      stock_code: string; stock_name: string;
+      signal: string; sub: string;
+      tags: { label: string; color: string }[];
+      close: number | null; rsi: number | null;
+      ma_align: string; macd_bull: boolean | null;
+    }[]>(`/api/v1/stock/today-signals?days=${days}`),
 };
 
 export const marketApi = {
@@ -124,12 +150,49 @@ export const marketApi = {
   getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate', { params }),
 
-
   getWinRateCombined: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/combined', { params }),
 
   getWinRateIndicator: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/indicator', { params }),
+
   getWinRateSimple: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/simple', { params }),
+};
+
+export const watchlistApi = {
+  get: () =>
+    apiClient.get<WatchlistItem[]>('/api/v1/watchlist'),
+
+  check: (stock_code: string) =>
+    apiClient.get<{ is_watching: boolean; id: string | null }>(`/api/v1/watchlist/check/${stock_code}`),
+
+  add: (stock_code: string, stock_name: string, memo?: string) =>
+    apiClient.post<WatchlistItem>('/api/v1/watchlist', { stock_code, stock_name, memo }),
+
+  remove: (id: string) =>
+    apiClient.delete(`/api/v1/watchlist/${id}`),
+};
+
+export const tradeLogApi = {
+  get: () =>
+    apiClient.get<TradeLogItem[]>('/api/v1/trade-log'),
+
+  getTrash: () =>
+    apiClient.get<TradeLogItem[]>('/api/v1/trade-log/trash'),
+
+  create: (data: TradeLogCreate) =>
+    apiClient.post<TradeLogItem>('/api/v1/trade-log', data),
+
+  update: (id: string, data: { price?: number; quantity?: number; memo?: string }) =>
+    apiClient.patch<TradeLogItem>(`/api/v1/trade-log/${id}`, data),
+
+  remove: (id: string) =>
+    apiClient.delete(`/api/v1/trade-log/${id}`),
+
+  restore: (id: string) =>
+    apiClient.post<TradeLogItem>(`/api/v1/trade-log/${id}/restore`),
+
+  permanentDelete: (id: string) =>
+    apiClient.delete(`/api/v1/trade-log/${id}/permanent`),
 };
