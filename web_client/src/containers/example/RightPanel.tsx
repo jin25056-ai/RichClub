@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { stockApi, watchlistApi, AIPredictionItem, WatchlistItem } from '../../api/stock';
 
-type RightTab = 'ai' | 'watchlist' | 'indicator';
+type RightTab = 'ai' | 'watchlist' | 'indicator' | 'news';
 
 const SIGNAL_COLOR: Record<string, string> = { 매수: '#16a34a', 매도: '#dc2626', 관망: '#d97706', '매수 우세': '#4ade80', '매도 우세': '#f87171', 중립: '#6b7280' };
 const SIGNAL_BG: Record<string, string>    = { 매수: '#14532d', 매도: '#7f1d1d', 관망: '#78350f', '매수 우세': '#14532d', '매도 우세': '#7f1d1d', 중립: '#1e1e2e' };
@@ -86,6 +86,20 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
       .finally(() => setIndLoading(false));
   }, []);
 
+  type NewsItem = { title: string; originallink: string; link: string; description: string; pubDate: string; };
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsQuery, setNewsQuery] = useState('주식 증권');
+
+  const fetchNews = useCallback((q?: string) => {
+    const query = q ?? '주식 증권';
+    setNewsQuery(query);
+    setNewsLoading(true);
+    stockApi.getNews(query)
+      .then((res) => setNewsItems(res.data.items ?? []))
+      .finally(() => setNewsLoading(false));
+  }, []);
+
   useEffect(() => { fetchPredictions(''); }, []);
   useEffect(() => { fetchWatchlist(); }, [fetchWatchlist]);
 
@@ -122,10 +136,11 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 탭 */}
       <div style={{ display: 'flex', borderBottom: '1px solid #1e1e2e', flexShrink: 0 }}>
-        {(['ai', 'indicator', 'watchlist'] as RightTab[]).map((t) => (
+        {(['ai', 'indicator', 'watchlist', 'news'] as RightTab[]).map((t) => (
           <button key={t} onClick={() => {
             setTab(t);
             if (t === 'indicator' && indItems.length === 0) fetchIndicators(indDays);
+            if (t === 'news' && newsItems.length === 0) fetchNews();
           }}
             style={{
               flex: 1, padding: '7px 0', fontSize: 10, border: 'none', cursor: 'pointer',
@@ -134,7 +149,7 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
               fontWeight: tab === t ? 600 : 400,
               borderBottom: tab === t ? '2px solid #6366f1' : '2px solid transparent',
             }}>
-            {t === 'ai' ? 'AI 예측' : t === 'indicator' ? '지표 예측' : '관심종목'}
+            {t === 'ai' ? 'AI' : t === 'indicator' ? '지표' : t === 'watchlist' ? '관심' : '뉴스'}
           </button>
         ))}
       </div>
@@ -327,6 +342,47 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 뉴스 탭 */}
+      {tab === 'news' && (
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', gap: 6, padding: '6px 8px', borderBottom: '1px solid #1e1e2e', alignItems: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: 9, color: '#4b5563', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{newsQuery}</span>
+            <button onClick={() => fetchNews(undefined)}
+              style={{ fontSize: 9, padding: '2px 5px', borderRadius: 3, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer', flexShrink: 0 }}>
+              전체
+            </button>
+            <button onClick={() => fetchNews(newsQuery)}
+              style={{ fontSize: 9, padding: '2px 5px', borderRadius: 3, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer', flexShrink: 0 }}>
+              갱신
+            </button>
+          </div>
+          {newsLoading ? (
+            <div style={{ padding: 20, fontSize: 11, color: '#666', textAlign: 'center' }}>불러오는 중...</div>
+          ) : (
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {newsItems.map((item, i) => (
+                <a key={i} href={item.originallink || item.link} target="_blank" rel="noreferrer"
+                  style={{ display: 'block', padding: '8px 10px', borderBottom: '1px solid #13131e', textDecoration: 'none' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#151525')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+                  <div style={{
+                    fontSize: 11, color: '#d1d5db', fontWeight: 500,
+                    marginBottom: 3, lineHeight: 1.4,
+                    display: '-webkit-box', WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                  }}
+                    dangerouslySetInnerHTML={{ __html: item.title }}
+                  />
+                  <div style={{ fontSize: 9, color: '#4b5563' }}>
+                    {new Date(item.pubDate).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </a>
+              ))}
             </div>
           )}
         </div>
