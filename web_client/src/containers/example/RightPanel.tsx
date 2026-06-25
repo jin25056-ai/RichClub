@@ -367,10 +367,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
               검색
             </button>
             <button onClick={() => { setNewsQuery('주식 증권'); fetchNews('주식 증권'); }}
-              style={{ fontSize: 9, padding: '3px 7px', borderRadius: 4, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer', flexShrink: 0 }}>
-              전체
-            </button>
-            <button onClick={() => fetchNews(newsQuery)}
               style={{ fontSize: 11, padding: '2px 5px', borderRadius: 4, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer', flexShrink: 0 }}
               title="새로고침">
               ↻
