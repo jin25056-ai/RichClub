@@ -108,13 +108,13 @@ export const stockApi = {
   getAIDetail: (stock_code: string) =>
     apiClient.get<AIDetailResponse>(`/api/v1/stock/ai/detail/${stock_code}`),
 
-  getRSI: (stock_code: string, period = '3m') =>
+  getRSI: (stock_code: string, period = 'all') =>
     apiClient.get<RSIResponse>(`/api/v1/stock/chart/rsi/${stock_code}`, { params: { period } }),
 
-  getMACD: (stock_code: string, period = '3m') =>
+  getMACD: (stock_code: string, period = 'all') =>
     apiClient.get<MACDResponse>(`/api/v1/stock/chart/macd/${stock_code}`, { params: { period } }),
 
-  getCandles: (stock_code: string, days = 1) =>
+  getCandles: (stock_code: string, days = 0) =>
     apiClient.get<CandleResponse>(`/api/v1/stock/chart/candle/${stock_code}`, { params: { days } }),
 
   getCandles5m: (stock_code: string, days = 1) =>
