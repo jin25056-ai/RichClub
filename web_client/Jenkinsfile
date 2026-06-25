@@ -17,7 +17,7 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ./web_client"
+                sh "docker build --build-arg NODE_OPTIONS=--max_old_space_size=512 -t ${IMAGE_NAME}:${BUILD_NUMBER} ./web_client"
                 sh "docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest"
             }
         }

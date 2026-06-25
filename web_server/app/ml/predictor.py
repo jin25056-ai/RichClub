@@ -1,21 +1,27 @@
 """
 app/ml/predictor.py
 
-1. run_daily_prediction: 매일 장 마감 후 XGBoost 예측 → total_trading_signals upsert
+1. run_daily_prediction: 매일 장 마감 후 XGBoost 예측 -> total_trading_signals upsert
 2. calculate_returns: total_trading_signals 내에서 +1/5/20/60일 수익률 계산 후 업데이트
-3. aggregate_monthly_performance: 월별 성능 집계 → model_performance_monthly 저장
+3. aggregate_monthly_performance: 월별 성능 집계 -> model_performance_monthly 저장
 4. check_and_retrain: 성능 나쁜 월 이후 자동 재학습
 """
+import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 
 import pandas as pd
+import yfinance as yf
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ASCENDING, UpdateOne
 
 from app.ml.trainer import FEATURE_COLS, LABEL_MAP, KOSPI_STOCKS, _fetch_market_data, _build_features
 
 logger = logging.getLogger(__name__)
+
+# 종목별 yfinance 재시도 설정
+_RETRY_COUNT = 3
+_RETRY_DELAY = 5  # 초
 
 
 def _safe(v):
@@ -26,10 +32,35 @@ def _safe(v):
         return None
 
 
+async def _fetch_stock_with_retry(ticker: str, buf_start: str, end_dt: str) -> pd.DataFrame:
+    """yfinance 다운로드 실패 시 최대 _RETRY_COUNT 회 재시도"""
+    loop = asyncio.get_event_loop()
+    last_exc = None
+    for attempt in range(1, _RETRY_COUNT + 1):
+        try:
+            raw = await loop.run_in_executor(
+                None,
+                lambda t=ticker: yf.download(
+                    t, start=buf_start, end=end_dt,
+                    interval='1d', progress=False, auto_adjust=True
+                )
+            )
+            if raw is not None and not raw.empty:
+                return raw
+            # 빈 데이터는 상장폐지 등으로 재시도해도 의미 없으므로 바로 반환
+            return pd.DataFrame()
+        except Exception as e:
+            last_exc = e
+            if attempt < _RETRY_COUNT:
+                logger.warning(f"[retry {attempt}/{_RETRY_COUNT}] {ticker} 다운로드 실패: {e} - {_RETRY_DELAY}초 후 재시도")
+                await asyncio.sleep(_RETRY_DELAY)
+            else:
+                logger.error(f"[retry 최종 실패] {ticker}: {e}")
+    raise last_exc
+
+
 async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None):
-    """매일 장 마감 후 전 종목 XGBoost 예측 → total_trading_signals upsert"""
-    import asyncio
-    import yfinance as yf
+    """매일 장 마감 후 전 종목 XGBoost 예측 -> total_trading_signals upsert"""
     from app.ml.trainer import load_model
 
     model = load_model()
@@ -50,19 +81,19 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
     market_map = _fetch_market_data(buf_start, end_dt)
 
     total = 0
+    failed_tickers = []
+
     for ticker, name, code in KOSPI_STOCKS:
         try:
-            raw = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda t=ticker: yf.download(t, start=buf_start, end=end_dt,
-                                              interval='1d', progress=False, auto_adjust=True)
-            )
+            raw = await _fetch_stock_with_retry(ticker, buf_start, end_dt)
             if raw.empty:
+                logger.warning(f"[predictor] {name}({ticker}) 데이터 없음 - 스킵")
                 continue
 
             df = _build_features(raw, market_map, name)
             today_rows = df[df.index.strftime('%Y-%m-%d') == today]
             if today_rows.empty:
+                logger.warning(f"[predictor] {name}({ticker}) 오늘({today}) 데이터 없음 - 스킵")
                 continue
 
             for dt, row in today_rows.iterrows():
@@ -89,7 +120,6 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
                     'vix_value': _safe(row.get('vix_value')),
                     'predicted_at': predicted_at,
                     'uploaded_at': datetime.utcnow(),
-                    # 수익률 필드 (나중에 calculate_returns가 채움)
                     'ret_1d': None, 'ret_5d': None, 'ret_20d': None, 'ret_60d': None,
                     'is_correct_5d': None,
                 }
@@ -100,26 +130,67 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
                 total += 1
 
         except Exception as e:
-            logger.error(f"{name} 예측 실패: {e}")
+            logger.error(f"[predictor] {name}({ticker}) 예측 최종 실패: {e}")
+            failed_tickers.append((ticker, name, code))
 
-    logger.info(f"[predictor] 완료: {total}건 ({today})")
+    # 실패 종목 1회 추가 재시도 (전체 루프 후)
+    if failed_tickers:
+        logger.warning(f"[predictor] 실패 종목 {len(failed_tickers)}개 재시도: {[n for _, n, _ in failed_tickers]}")
+        await asyncio.sleep(10)
+        for ticker, name, code in failed_tickers:
+            try:
+                raw = await _fetch_stock_with_retry(ticker, buf_start, end_dt)
+                if raw.empty:
+                    continue
+                df = _build_features(raw, market_map, name)
+                today_rows = df[df.index.strftime('%Y-%m-%d') == today]
+                if today_rows.empty:
+                    continue
+                for dt, row in today_rows.iterrows():
+                    feat = row[FEATURE_COLS]
+                    if feat.isna().any():
+                        continue
+                    pred_label = int(model.predict(pd.DataFrame([feat]))[0])
+                    signal = LABEL_MAP.get(pred_label, '관망')
+                    predicted_at = datetime(dt.year, dt.month, dt.day)
+                    doc = {
+                        'stock_code': code, 'stock_name': name,
+                        'close': _safe(row.get('close')), 'open': _safe(row.get('open')),
+                        'high': _safe(row.get('high')), 'low': _safe(row.get('low')),
+                        'volume': _safe(row.get('volume')),
+                        'signal': signal, 'signal_label': pred_label,
+                        'macd': _safe(row.get('macd')),
+                        'stoch_k': _safe(row.get('stoch_k')), 'stoch_d': _safe(row.get('stoch_d')),
+                        'ma5': _safe(row.get('ma5')), 'ma20': _safe(row.get('ma20')), 'ma60': _safe(row.get('ma60')),
+                        'ma5_20_ratio': _safe(row.get('ma5_20_ratio')),
+                        'ma20_60_ratio': _safe(row.get('ma20_60_ratio')),
+                        'close_ma60_ratio': _safe(row.get('close_ma60_ratio')),
+                        'vix_value': _safe(row.get('vix_value')),
+                        'predicted_at': predicted_at,
+                        'uploaded_at': datetime.utcnow(),
+                        'ret_1d': None, 'ret_5d': None, 'ret_20d': None, 'ret_60d': None,
+                        'is_correct_5d': None,
+                    }
+                    await col.update_one(
+                        {'stock_name': name, 'predicted_at': predicted_at},
+                        {'$set': doc}, upsert=True
+                    )
+                    total += 1
+                    logger.info(f"[predictor] 재시도 성공: {name}")
+            except Exception as e:
+                logger.error(f"[predictor] {name}({ticker}) 재시도도 실패: {e}")
 
-    # 예측 후 수익률 계산 실행
+    logger.info(f"[predictor] 완료: {total}건 ({today}), 최종 실패: {len(failed_tickers)}개")
+
     await calculate_returns(db)
 
 
 async def calculate_returns(db: AsyncIOMotorDatabase):
     """
-    total_trading_signals에서 종목별 매수→매도 포지션 추적으로 수익률 계산
-    market.py get_win_rate와 동일한 로직
+    total_trading_signals에서 종목별 매수->매도 포지션 추적으로 수익률 계산
     결과를 각 매수 신호 도큐먼트에 ret_realized / is_correct 필드로 저장
     """
-    from collections import defaultdict
-    from pymongo import UpdateOne
-
     col = db.total_trading_signals
-    # ret_realized가 없는 매수 신호 중 청산 가능한 것 처리
-    # 전체 종목별로 그룹핑
     pipeline = [
         {'$match': {'signal': {'$in': ['매수', '매도']}}},
         {'$group': {'_id': '$stock_code', 'count': {'$sum': 1}}},
@@ -131,12 +202,10 @@ async def calculate_returns(db: AsyncIOMotorDatabase):
 
     logger.info(f"[returns] {len(codes)}개 종목 포지션 추적 시작")
     bulk_ops = []
-    total_updated = 0
 
     for code in codes:
         if not code:
             continue
-        # 종목의 모든 신호를 날짜순으로 조회
         cursor = col.find(
             {'stock_code': code, 'signal': {'$in': ['매수', '매도']}},
             sort=[('predicted_at', 1)]
@@ -169,12 +238,9 @@ async def calculate_returns(db: AsyncIOMotorDatabase):
                         'sell_price': close,
                     }}
                 ))
-                total_updated += 1
                 position = None
 
-        # 미청산 포지션
         if position is not None:
-            # 최신 종가로 미실현 수익률
             latest = await col.find_one(
                 {'stock_code': code, 'close': {'$ne': None}},
                 sort=[('predicted_at', -1)],
@@ -197,8 +263,8 @@ async def calculate_returns(db: AsyncIOMotorDatabase):
 
 async def aggregate_monthly_performance(db: AsyncIOMotorDatabase):
     """
-    total_trading_signals에서 매수→매도 실현 수익률 기반 월별 집계
-    → model_performance_monthly 저장
+    total_trading_signals에서 매수->매도 실현 수익률 기반 월별 집계
+    -> model_performance_monthly 저장
     """
     pipeline = [
         {'$match': {'signal': '매수', 'ret_realized': {'$ne': None}}},
@@ -249,9 +315,7 @@ async def aggregate_monthly_performance(db: AsyncIOMotorDatabase):
 
 
 async def check_and_retrain(db: AsyncIOMotorDatabase):
-    """
-    최근 2개월 매수 신호 정확도가 50% 미만이면 자동 재학습
-    """
+    """최근 2개월 매수 신호 정확도가 50% 미만이면 자동 재학습"""
     two_months_ago = datetime.utcnow() - timedelta(days=60)
     pipeline = [
         {'$match': {
@@ -273,6 +337,6 @@ async def check_and_retrain(db: AsyncIOMotorDatabase):
     logger.info(f"[check_retrain] 최근 2개월 매수 정확도: {acc:.1%} ({results[0]['correct']}/{results[0]['total']})")
 
     if acc < 0.50:
-        logger.warning("[check_retrain] 정확도 50% 미만 → 자동 재학습")
+        logger.warning("[check_retrain] 정확도 50% 미만 -> 자동 재학습")
         from app.ml.trainer import train_model
         await train_model(db, triggered_by="auto_drift")
