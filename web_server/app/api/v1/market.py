@@ -1,6 +1,7 @@
 """
 글로벌 시장 현황 + 승률 테스트 API
 - Yahoo Finance 429 방지: 서버 메모리 캐시 10분
+- MA60 하락 구간: 매수 금지 (침체 구간)
 """
 import asyncio
 import time
@@ -255,6 +256,13 @@ def _to_date(dt) -> datetime:
     return dt
 
 
+def _ma60_falling(ma60, prev_ma60) -> bool:
+    """MA60 하락 중 여부 - 침체 구간 판단"""
+    if ma60 is None or prev_ma60 is None:
+        return False
+    return float(ma60) < float(prev_ma60)
+
+
 def _build_winrate_response(
     stock_code, stock_name, period, hold_days,
     realized_returns, unrealized_positions, trades, signal_label
@@ -295,7 +303,7 @@ def _build_winrate_response(
     )
 
 
-@router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트 (AI)")
+@router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트 (AI) - MA60 하락 구간 매수 제외")
 async def get_win_rate(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
@@ -307,7 +315,7 @@ async def get_win_rate(
 ):
     """
     AI 승률 테스트
-    - 매수: AI 매수 신호
+    - 매수: AI 매수 신호 + MA60 하락 구간 제외
     - 매도: AI 매도 신호
     """
     if period not in PERIOD_DAYS_MAP:
@@ -338,18 +346,21 @@ async def get_win_rate(
     for sc, sdocs in sc_docs.items():
         position = None
         latest_price = None
+        prev_ma60 = None
 
         for doc in sdocs:
             signal = doc.get("signal", "관망")
             dt = _to_date(doc.get("predicted_at"))
             close = doc.get("close")
+            ma60 = doc.get("ma60")
             if close is None:
                 continue
             close = float(close)
             latest_price = close
             date_str = dt.strftime("%Y-%m-%d")
 
-            if signal == "매수" and position is None:
+            # MA60 하락 구간은 매수 금지
+            if signal == "매수" and position is None and not _ma60_falling(ma60, prev_ma60):
                 position = {"buy_date": date_str, "buy_price": close}
             elif signal == "매도" and position is not None:
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -360,6 +371,9 @@ async def get_win_rate(
                 realized_returns.append(ret_pct)
                 position = None
 
+            if ma60 is not None:
+                prev_ma60 = float(ma60)
+
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
             unrealized_positions.append(unrealized_pct)
@@ -369,10 +383,11 @@ async def get_win_rate(
             ))
 
     return _build_winrate_response(stock_code, stock_name, period, hold_days,
-                                   realized_returns, unrealized_positions, trades, "매수(AI)→매도(AI)")
+                                   realized_returns, unrealized_positions, trades,
+                                   "매수(AI+MA60상승)→매도(AI)")
 
 
-@router.get("/winrate/simple", response_model=WinRateResponse, summary="승률 테스트 (AI 매수 + 5일선 매도)")
+@router.get("/winrate/simple", response_model=WinRateResponse, summary="승률 테스트 (AI 매수 + 5일선 매도) - MA60 하락 제외")
 async def get_win_rate_simple(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
@@ -384,7 +399,7 @@ async def get_win_rate_simple(
 ):
     """
     단순 승률 테스트
-    - 매수: AI 매수 신호
+    - 매수: AI 매수 신호 + MA60 하락 구간 제외
     - 매도: 5일선 꺾임(ma5 < 전날 ma5)
     """
     if period not in PERIOD_DAYS_MAP:
@@ -416,12 +431,14 @@ async def get_win_rate_simple(
         position = None
         latest_price = None
         prev_ma5 = None
+        prev_ma60 = None
 
         for doc in sdocs:
             signal = doc.get("signal", "관망")
             dt = _to_date(doc.get("predicted_at"))
             close = doc.get("close")
             ma5 = doc.get("ma5")
+            ma60 = doc.get("ma60")
             if close is None:
                 continue
             close = float(close)
@@ -431,7 +448,8 @@ async def get_win_rate_simple(
             ma5_turning_down = (ma5 is not None and prev_ma5 is not None
                                 and float(ma5) < float(prev_ma5))
 
-            if signal == "매수" and position is None:
+            # MA60 하락 구간은 매수 금지
+            if signal == "매수" and position is None and not _ma60_falling(ma60, prev_ma60):
                 position = {"buy_date": date_str, "buy_price": close}
             elif ma5_turning_down and position is not None:
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -444,6 +462,8 @@ async def get_win_rate_simple(
 
             if ma5 is not None:
                 prev_ma5 = float(ma5)
+            if ma60 is not None:
+                prev_ma60 = float(ma60)
 
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -455,10 +475,10 @@ async def get_win_rate_simple(
 
     return _build_winrate_response(stock_code, stock_name, period, hold_days,
                                    realized_returns, unrealized_positions, trades,
-                                   "매수(AI)→매도(5일선꺾임)")
+                                   "매수(AI+MA60상승)→매도(5일선꺾임)")
 
 
-@router.get("/winrate/combined", response_model=WinRateResponse, summary="승률 테스트 (AI+정배열 매수)")
+@router.get("/winrate/combined", response_model=WinRateResponse, summary="승률 테스트 (AI+정배열 매수) - MA60 하락 제외")
 async def get_win_rate_combined(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
@@ -470,7 +490,7 @@ async def get_win_rate_combined(
 ):
     """
     AI+지표 동시 매수 승률 테스트
-    - 매수: AI 매수 신호 + MA 정배열(ma5>ma20>ma60) 동시 충족
+    - 매수: AI 매수 신호 + MA 정배열(ma5>ma20>ma60) + MA60 상승 중
     - 매도: AI 매도 신호 or MA 역배열(ma5<ma20<ma60)
     """
     if period not in PERIOD_DAYS_MAP:
@@ -501,6 +521,7 @@ async def get_win_rate_combined(
     for sc, sdocs in sc_docs.items():
         position = None
         latest_price = None
+        prev_ma60 = None
 
         for doc in sdocs:
             signal = doc.get("signal", "관망")
@@ -520,7 +541,8 @@ async def get_win_rate_combined(
             ma_bearish = (ma5 is not None and ma20 is not None and ma60 is not None
                           and float(ma5) < float(ma20) < float(ma60))
 
-            if signal == "매수" and ma_bullish and position is None:
+            # MA60 하락 구간은 매수 금지
+            if signal == "매수" and ma_bullish and position is None and not _ma60_falling(ma60, prev_ma60):
                 position = {"buy_date": date_str, "buy_price": close}
             elif position is not None and (signal == "매도" or ma_bearish):
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -530,6 +552,9 @@ async def get_win_rate_combined(
                 ))
                 realized_returns.append(ret_pct)
                 position = None
+
+            if ma60 is not None:
+                prev_ma60 = float(ma60)
 
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -541,10 +566,10 @@ async def get_win_rate_combined(
 
     return _build_winrate_response(stock_code, stock_name, period, hold_days,
                                    realized_returns, unrealized_positions, trades,
-                                   "매수(AI+정배열)→매도(AI or 역배열)")
+                                   "매수(AI+정배열+MA60상승)→매도(AI or 역배열)")
 
 
-@router.get("/winrate/indicator", response_model=WinRateResponse, summary="승률 테스트 (지표만)")
+@router.get("/winrate/indicator", response_model=WinRateResponse, summary="승률 테스트 (지표만) - MA60 하락 제외")
 async def get_win_rate_indicator(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
@@ -556,8 +581,8 @@ async def get_win_rate_indicator(
 ):
     """
     지표만 승률 테스트 (AI 신호 무시)
-    - 매수: MA 정배열 첫 진입 시점(ma5>ma20>ma60)
-    - 매도: MA 역배열 전환 시점(ma5<ma20<ma60)
+    - 매수: MA 정배열 첫 진입 + MA60 상승 중
+    - 매도: MA 역배열 전환
     """
     if period not in PERIOD_DAYS_MAP:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
@@ -588,6 +613,7 @@ async def get_win_rate_indicator(
         position = None
         latest_price = None
         prev_in_bullish = False
+        prev_ma60 = None
 
         for doc in sdocs:
             dt = _to_date(doc.get("predicted_at"))
@@ -606,7 +632,8 @@ async def get_win_rate_indicator(
             ma_bearish = (ma5 is not None and ma20 is not None and ma60 is not None
                           and float(ma5) < float(ma20) < float(ma60))
 
-            if ma_bullish and not prev_in_bullish and position is None:
+            # MA60 하락 구간은 매수 금지
+            if ma_bullish and not prev_in_bullish and position is None and not _ma60_falling(ma60, prev_ma60):
                 position = {"buy_date": date_str, "buy_price": close}
             elif ma_bearish and position is not None:
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -618,6 +645,8 @@ async def get_win_rate_indicator(
                 position = None
 
             prev_in_bullish = ma_bullish
+            if ma60 is not None:
+                prev_ma60 = float(ma60)
 
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -629,4 +658,4 @@ async def get_win_rate_indicator(
 
     return _build_winrate_response(stock_code, stock_name, period, hold_days,
                                    realized_returns, unrealized_positions, trades,
-                                   "매수(MA정배열)→매도(MA역배열)")
+                                   "매수(MA정배열+MA60상승)→매도(MA역배열)")

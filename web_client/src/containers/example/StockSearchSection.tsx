@@ -120,6 +120,10 @@ const tipHeader = (label: string, ...badges: (React.ReactElement | null)[]) => (
 
 const getCompositeSignal = (d: any) => {
   if (!d) return null;
+  // MA60 하락 중 = 침체 구간 → 매수/매도 신호 없음
+  if (d.ma60Falling) return { label: '침체 구간', sub: 'MA60 하락중 매수금지', color: '#6b7280', stagnant: true };
+  // MA60 턴 시점 = 최우선 매수 신호
+  if (d.ma60Turning) return { label: 'MA60 턴', sub: '60일선 반등 - 매수 타이밍', color: '#f0abfc', turning: true };
   if (d.rsiBreakDown) return { label: '강한 매도', sub: 'RSI 70 하방이탈', color: '#dc2626' };
 
   let bull = 0;
@@ -167,6 +171,12 @@ const CandleTooltip = ({ active, payload, label }: any) => {
           <span style={{ fontSize: 10, fontWeight: 700, color: composite.color }}>{composite.label}</span>
           <span style={{ fontSize: 9, color: composite.color + 'cc' }}>{composite.sub}</span>
         </div>
+      )}
+      {(composite as any)?.stagnant && (
+        <div style={{ fontSize: 9, color: '#6b7280', marginBottom: 4 }}>MA60 하락 구간 — 매수/매도 금지</div>
+      )}
+      {(composite as any)?.turning && (
+        <div style={{ fontSize: 9, color: '#f0abfc', fontWeight: 600, marginBottom: 4 }}>MA60 반등 전환점 — 매수 타이밍</div>
       )}
       {tipRow('시가', fmt(d.open))}
       {tipRow('고가', fmt(d.high), '#16a34a')}
@@ -265,7 +275,11 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       const deadCross = prev?.ma5 != null && prev?.ma20 != null && row.ma5 != null && row.ma20 != null
         && prev.ma5 > prev.ma20 && row.ma5 < row.ma20;
       const rsiBreakDown = prev?.rsi != null && row.rsi != null && prev.rsi >= 70 && row.rsi < 70;
-      return { ...row, aiSignal: sigMap[row.datetime] ?? null, simpleSell, goldenCross, deadCross, rsiBreakDown };
+      const ma60Falling = prev?.ma60 != null && row.ma60 != null && row.ma60 < prev.ma60;
+      const prevPrev = i > 1 ? all[i - 2] : null;
+      const ma60Turning = prevPrev?.ma60 != null && prev?.ma60 != null && row.ma60 != null
+        && prev.ma60 < prevPrev.ma60 && row.ma60 >= prev.ma60;
+      return { ...row, aiSignal: sigMap[row.datetime] ?? null, simpleSell, goldenCross, deadCross, rsiBreakDown, ma60Falling, ma60Turning };
     });
     setChartData(finalData);
     setViewRange(null);
@@ -584,7 +598,10 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
                 )} />
               <Bar dataKey="close" shape={CandleShape} isAnimationActive={false} maxBarSize={20} name="캔들" legendType="none">
                 {visData.map((d, i) => (
-                  <Cell key={i} fill={(d.close ?? 0) >= (d.open ?? 0) ? '#16a34a' : '#dc2626'} />
+                  <Cell key={i}
+                    fill={(d.close ?? 0) >= (d.open ?? 0) ? '#16a34a' : '#dc2626'}
+                    fillOpacity={d.ma60Falling ? 0.25 : 1}
+                  />
                 ))}
               </Bar>
               <Line type="monotone" dataKey="ma60"   stroke="#a78bfa" dot={false} strokeWidth={1.5} connectNulls legendType="none" />
