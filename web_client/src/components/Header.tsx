@@ -33,29 +33,15 @@ const Header: React.FC = () => {
 const styles: Record<string, React.CSSProperties> = {
   header: {
     padding: '16px 32px',
-    borderBottom: '1px solid #2a2a2a',
+    borderBottom: '1px solid #1e1e2e',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#111111',
+    backgroundColor: '#0a0a14',
   },
-  title: {
-    fontSize: '20px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    letterSpacing: '-0.5px',
-    color: '#ffffff',
-  },
-  nav: {
-    display: 'flex',
-    gap: '24px',
-    alignItems: 'center',
-  },
-  navItem: {
-    fontSize: '14px',
-    color: '#888888',
-    cursor: 'pointer',
-  },
+  title: { cursor: 'pointer' },
+  nav: { display: 'flex', gap: '24px', alignItems: 'center' },
+  navItem: { fontSize: '14px', color: '#6b7280', cursor: 'pointer' },
 };
 
 export default Header;
