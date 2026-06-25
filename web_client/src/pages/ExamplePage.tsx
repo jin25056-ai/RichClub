@@ -26,7 +26,8 @@ const ExamplePage: React.FC = () => {
   const [mobile, setMobile] = useState(isMobile());
   const [activeTab, setActiveTab] = useState<Tab>('chart');
   const [watchId, setWatchId] = useState<string | null>(null);
-  const [tradeModalOpen, setTradeModalOpen] = useState(false); // 현재 종목 관심 여부
+  const [tradeModalOpen, setTradeModalOpen] = useState(false);
+  const [currentPrice, setCurrentPrice] = useState<number | undefined>(undefined); // 현재 종목 관심 여부
 
   useEffect(() => {
     if (!localStorage.getItem('access_token')) {
@@ -236,6 +237,7 @@ const ExamplePage: React.FC = () => {
         onClose={() => setTradeModalOpen(false)}
         initialStockCode={selectedStock?.code}
         initialStockName={selectedStock?.name}
+        initialPrice={currentPrice}
       />
       <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
         <div style={{ width: 190, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
@@ -261,7 +263,7 @@ const ExamplePage: React.FC = () => {
         </div>
 
         <div style={{ flex: 1, minWidth: 0, ...panel, overflow: 'hidden' }}>
-          <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} />
+          <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} onPriceUpdate={setCurrentPrice} />
         </div>
 
         <div style={{ width: 195, flexShrink: 0, ...panel, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>

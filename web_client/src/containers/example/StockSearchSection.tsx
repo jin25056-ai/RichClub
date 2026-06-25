@@ -385,9 +385,10 @@ interface Props {
   period?: Period;
   sellMode?: 'ai' | 'simple';
   chartInterval?: ChartInterval;
+  onPriceUpdate?: (price: number) => void;
 }
 
-const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, searchOnly, chartOnly, period: externalPeriod, sellMode = 'ai', chartInterval: externalInterval }) => {
+const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, searchOnly, chartOnly, period: externalPeriod, sellMode = 'ai', chartInterval: externalInterval, onPriceUpdate }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StockItem[]>([]);
   const [selected, setSelected] = useState<StockItem | null>(null);
@@ -748,6 +749,9 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           sigMap[date] = pd.signal;
         });
         setRawData({ trimmed, futurePadding, sigMap });
+        // 마지막 종가 콜백
+        const lastClose = trimmed.length ? trimmed[trimmed.length - 1].close : null;
+        if (lastClose != null) onPriceUpdate?.(lastClose);
       })
       .catch(() => setError('데이터를 불러오지 못했습니다.'))
       .finally(() => setLoading(false));
