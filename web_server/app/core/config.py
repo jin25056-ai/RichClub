@@ -14,8 +14,12 @@ class Settings(BaseSettings):
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_user: str = ""
-    smtp_password: str = ""  # Gmail 앱 비밀번호
+    smtp_password: str = ""
     email_from: str = ""
+
+    # 네이버 뉴스 API
+    naver_client_id: str = ""
+    naver_client_secret: str = ""
 
 
 settings = Settings()
