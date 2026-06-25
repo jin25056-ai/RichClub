@@ -442,9 +442,9 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
     const fetchDays = displayDays + PERIOD_EXTRA;
 
     Promise.all([
-      stockApi.getCandles(code, fetchDays),
-      stockApi.getRSI(code, p),
-      stockApi.getMACD(code, p),
+      stockApi.getCandles(code, 0),
+      stockApi.getRSI(code, 'all'),
+      stockApi.getMACD(code, 'all'),
       stockApi.getPredictions(undefined, 500, name),
     ])
       .then(([candleRes, rsiRes, macdRes, predRes]) => {
