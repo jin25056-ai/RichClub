@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import GlobalMarketSection from '../containers/example/GlobalMarketSection';
-import AIPredictionsSection from '../containers/example/AIPredictionsSection';
+import RightPanel from '../containers/example/RightPanel';
 import StockSearchSection from '../containers/example/StockSearchSection';
 import WinRateSection from '../containers/example/WinRateSection';
-import { stockApi } from '../api/stock';
+import { stockApi, watchlistApi } from '../api/stock';
 import '../styles/example.css';
 
 type Period = '1m' | '3m' | '6m';
@@ -24,6 +24,7 @@ const ExamplePage: React.FC = () => {
   const [marketUpdatedAt, setMarketUpdatedAt] = useState<string | null>(null);
   const [mobile, setMobile] = useState(isMobile());
   const [activeTab, setActiveTab] = useState<Tab>('chart');
+  const [watchId, setWatchId] = useState<string | null>(null); // 현재 종목 관심 여부
 
   useEffect(() => {
     if (!localStorage.getItem('access_token')) {
@@ -40,6 +41,7 @@ const ExamplePage: React.FC = () => {
         if (found) {
           setSelectedStock({ code: found.stock_code, name: found.stock_name });
           setCurrentName(found.stock_name);
+          checkWatch(found.stock_code);
         }
       }).catch(() => {});
     } else {
@@ -59,14 +61,32 @@ const ExamplePage: React.FC = () => {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  // 종목 변경 시 관심종목 여부 확인
+  const checkWatch = useCallback((code: string) => {
+    watchlistApi.check(code)
+      .then((res) => setWatchId(res.data.is_watching ? res.data.id : null))
+      .catch(() => setWatchId(null));
+  }, []);
+
   const handleSelectStock = (code: string, name: string) => {
     setSelectedStock({ code, name });
     setCurrentName(name);
     if (mobile) setActiveTab('chart');
-    // URL 업데이트 (새로고침 시 유지)
     const params = new URLSearchParams(location.search);
     params.set('code', code);
     navigate(`?${params.toString()}`, { replace: true });
+    checkWatch(code);
+  };
+
+  const handleToggleWatch = async () => {
+    if (!selectedStock) return;
+    if (watchId) {
+      await watchlistApi.remove(watchId);
+      setWatchId(null);
+    } else {
+      const res = await watchlistApi.add(selectedStock.code, selectedStock.name);
+      setWatchId(res.data.id);
+    }
   };
 
   const TABS: { key: Tab; label: string }[] = [
@@ -122,12 +142,24 @@ const ExamplePage: React.FC = () => {
         </>
       )}
       {currentName && (
-        <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 600 }}>
-          — {currentName}
-          {selectedStock?.code && <span style={{ fontSize: 10, color: '#4b5563', fontWeight: 400, marginLeft: 4 }}>{selectedStock.code}</span>}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 600 }}>
+            — {currentName}
+            {selectedStock?.code && <span style={{ fontSize: 10, color: '#4b5563', fontWeight: 400, marginLeft: 4 }}>{selectedStock.code}</span>}
+          </span>
+          <button
+            onClick={handleToggleWatch}
+            title={watchId ? '관심종목 제거' : '관심종목 추가'}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: watchId ? '#fbbf24' : '#374151', padding: '0 2px', lineHeight: 1 }}>
+            {watchId ? '★' : '☆'}
+          </button>
         </span>
       )}
-      <div style={{ marginLeft: 'auto' }}>
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+        <button onClick={() => navigate('/trade')}
+          style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#a5b4fc', border: '1px solid #3730a3', borderRadius: 4, cursor: 'pointer' }}>
+          매매일지
+        </button>
         <button onClick={() => window.open('/mlops', '_blank')}
           style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#6b7280', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer' }}>
           MLOps
@@ -159,8 +191,7 @@ const ExamplePage: React.FC = () => {
           )}
           {activeTab === 'ai' && (
             <div style={{ ...panel, minHeight: '60vh' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 8 }}>AI 예측 목록</div>
-              <AIPredictionsSection onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} />
+              <RightPanel onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} />
             </div>
           )}
           {activeTab === 'market' && (
@@ -226,12 +257,7 @@ const ExamplePage: React.FC = () => {
         </div>
 
         <div style={{ width: 195, flexShrink: 0, ...panel, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
-          <div style={{ padding: '8px 10px', borderBottom: '1px solid #1e1e2e', fontSize: 11, fontWeight: 600, color: '#666', flexShrink: 0 }}>
-            AI 예측 목록
-          </div>
-          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <AIPredictionsSection onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} />
-          </div>
+          <RightPanel onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} />
         </div>
       </div>
     </div>
