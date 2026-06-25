@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import AuthPage from '../pages/AuthPage';
 import ExamplePage from '../pages/ExamplePage';
 import MLOpsDashboard from '../pages/MLOpsDashboard';
+import TradePage from '../pages/TradePage';
 
 const AppRouter: React.FC = () => {
   return (
@@ -11,6 +12,7 @@ const AppRouter: React.FC = () => {
         <Route path="/" element={<ExamplePage />} />
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/mlops" element={<MLOpsDashboard />} />
+        <Route path="/trade" element={<TradePage />} />
       </Routes>
     </BrowserRouter>
   );

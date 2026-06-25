@@ -298,7 +298,17 @@ const TradeModal: React.FC<Props> = ({ isOpen, onClose, initialStockCode, initia
               </div>
               <div style={{ flex: 1 }}>
                 <label style={lbl}>수량 (주)</label>
-                <input style={input} type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
+                <input style={input} type="number" value={quantity}
+                  onChange={(e) => {
+                    setQuantity(e.target.value);
+                    // 수량 입력 시 가격이 비어있으면 현재가 자동 조회
+                    if (!price && selectedStock && e.target.value) {
+                      stockApi.getPrice(selectedStock.stock_code)
+                        .then((res) => { if (res.data.close) setPrice(String(Math.round(res.data.close))); })
+                        .catch(() => {});
+                    }
+                  }}
+                  placeholder="0" />
               </div>
             </div>
             <div style={{ fontSize: 11, color: totalAmount > 0 ? (tradeType === 'buy' ? '#4ade80' : '#f87171') : 'transparent', textAlign: 'right', minHeight: 16 }}>
