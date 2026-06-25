@@ -126,6 +126,22 @@ export const stockApi = {
 
   getPrice: (stock_code: string) =>
     apiClient.get<{ stock_code: string; stock_name: string; close: number; predicted_at: string }>(`/api/v1/stock/price/${stock_code}`),
+
+  getIndicatorSignals: () =>
+    apiClient.get<{
+      stock_code: string; stock_name: string; signal: string; score: number;
+      reasons: string[]; rsi: number | null; ma_align: string;
+      macd_bull: boolean | null; close: number | null;
+    }[]>('/api/v1/stock/indicator-signals'),
+
+  getTodaySignals: (days = 1) =>
+    apiClient.get<{
+      stock_code: string; stock_name: string;
+      signal: string; sub: string;
+      tags: { label: string; color: string }[];
+      close: number | null; rsi: number | null;
+      ma_align: string; macd_bull: boolean | null;
+    }[]>(`/api/v1/stock/today-signals?days=${days}`),
 };
 
 export const marketApi = {

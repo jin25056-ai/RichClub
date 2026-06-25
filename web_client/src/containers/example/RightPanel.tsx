@@ -48,7 +48,7 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
   const [indItems, setIndItems] = useState<TodaySignalItem[]>([]);
   const [indDays, setIndDays] = useState(1);
   const [indLoading, setIndLoading] = useState(false);
-  const [expandedCodes, setExpandedCodes] = useState<Set<string>>(new Set());
+  const [expandedCodes] = useState<Set<string>>(new Set());
 
   // AI 예측 상태
   const [items, setItems] = useState<AIPredictionItem[]>([]);
@@ -271,95 +271,59 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
                     : String(it.close)
                   : '-';
                 return (
-                  <div key={it.stock_code} style={{ borderBottom: '1px solid #13131e' }}>
-                    {/* 종목 행 */}
-                    <div
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 5,
-                        padding: '6px 8px', cursor: 'pointer',
-                        background: isActive ? '#1a1a30' : 'transparent',
-                      }}
-                      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#151525'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? '#1a1a30' : 'transparent'; }}
-                    >
-                      {/* 종합신호 배지 */}
-                      <div style={{
-                        fontSize: 8, padding: '2px 4px', borderRadius: 3, flexShrink: 0,
-                        background: sc.bg, color: sc.color, fontWeight: 700, whiteSpace: 'nowrap',
-                      }}>
-                        {it.signal}
-                      </div>
-                      {/* 종목명 - 클릭시 차트 이동 */}
-                      <div style={{ flex: 1, minWidth: 0 }}
-                        onClick={() => onSelectStock(it.stock_code, it.stock_name)}>
-                        <div style={{
-                          fontSize: 11, color: isActive ? '#a5b4fc' : '#d1d5db',
+                  <div key={it.stock_code}
+                    onClick={() => onSelectStock(it.stock_code, it.stock_name)}
+                    style={{
+                      padding: '6px 8px', cursor: 'pointer', borderBottom: '1px solid #13131e',
+                      background: isActive ? '#1a1a30' : 'transparent',
+                    }}
+                    onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#151525'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? '#1a1a30' : 'transparent'; }}
+                  >
+                    {/* 1행: 종목명 + 현재가 + 별표 */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+                      <div
+                        title={it.signal}
+                        style={{
+                          flex: 1, fontSize: 11,
+                          color: isActive ? '#a5b4fc' : '#d1d5db',
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                           fontWeight: isActive ? 600 : 400,
                         }}>
-                          {it.stock_name}
-                        </div>
-                        {/* 태그 인라인 표시 */}
-                        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
-                          {it.tags.slice(0, isExpanded ? undefined : 3).map((tag, ti) => (
-                            <span key={ti} style={{
-                              fontSize: 8, padding: '1px 4px', borderRadius: 3,
-                              background: tag.color + '22', color: tag.color,
-                              border: `1px solid ${tag.color}44`,
-                              fontWeight: 600, whiteSpace: 'nowrap',
-                            }}>
-                              {tag.label}
-                            </span>
-                          ))}
-                          {!isExpanded && it.tags.length > 3 && (
-                            <span style={{ fontSize: 8, color: '#4b5563' }}>+{it.tags.length - 3}</span>
-                          )}
-                        </div>
+                        {it.stock_name}
                       </div>
-                      {/* 현재가 + 펼치기 */}
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
-                        <span style={{ fontSize: 10, color: '#9ca3af' }}>{fmtClose}</span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedCodes((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(it.stock_code)) next.delete(it.stock_code);
-                              else next.add(it.stock_code);
-                              return next;
-                            });
-                          }}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 9, color: '#4b5563', padding: 0, lineHeight: 1 }}>
-                          {isExpanded ? '▲' : '▼'}
-                        </button>
-                      </div>
+                      <span style={{ fontSize: 10, color: '#9ca3af', flexShrink: 0 }}>{fmtClose}</span>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const id = watchIds[it.stock_code];
+                          if (id) {
+                            await watchlistApi.remove(id);
+                            setWatchIds((prev) => { const n = { ...prev }; delete n[it.stock_code]; return n; });
+                            setWatchlist((prev) => prev.filter((w) => w.stock_code !== it.stock_code));
+                          } else {
+                            const res = await watchlistApi.add(it.stock_code, it.stock_name);
+                            setWatchIds((prev) => ({ ...prev, [it.stock_code]: res.data.id }));
+                            setWatchlist((prev) => [res.data, ...prev]);
+                          }
+                        }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: watchIds[it.stock_code] ? '#fbbf24' : '#374151', padding: 0, lineHeight: 1, flexShrink: 0 }}>
+                        {watchIds[it.stock_code] ? '★' : '☆'}
+                      </button>
                     </div>
-                    {/* 펼쳐진 상세 */}
-                    {isExpanded && (
-                      <div style={{ padding: '4px 10px 8px 10px', background: '#0d0d1a', borderTop: '1px solid #1e1e2e' }}>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
-                          {it.tags.map((tag, ti) => (
-                            <span key={ti} style={{
-                              fontSize: 9, padding: '2px 6px', borderRadius: 4,
-                              background: tag.color + '22', color: tag.color,
-                              border: `1px solid ${tag.color}44`, fontWeight: 600,
-                            }}>
-                              {tag.label}
-                            </span>
-                          ))}
-                        </div>
-                        <div style={{ fontSize: 9, color: '#4b5563' }}>{it.sub}</div>
-                        <button
-                          onClick={() => onSelectStock(it.stock_code, it.stock_name)}
-                          style={{
-                            marginTop: 6, fontSize: 9, padding: '3px 8px', borderRadius: 4,
-                            border: '1px solid #3730a3', background: 'transparent',
-                            color: '#a5b4fc', cursor: 'pointer',
-                          }}>
-                          차트 보기
-                        </button>
-                      </div>
-                    )}
+                    {/* 2행: 태그들 */}
+                    <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                      {it.tags.map((tag, ti) => (
+                        <span key={ti} style={{
+                          fontSize: 8, padding: '1px 4px', borderRadius: 3,
+                          background: tag.color + '22', color: tag.color,
+                          border: `1px solid ${tag.color}44`,
+                          fontWeight: 600, whiteSpace: 'nowrap',
+                        }}>
+                          {tag.label}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 );
               })}
