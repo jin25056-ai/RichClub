@@ -350,15 +350,30 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
       {/* 뉴스 탭 */}
       {tab === 'news' && (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', gap: 6, padding: '6px 8px', borderBottom: '1px solid #1e1e2e', alignItems: 'center', flexShrink: 0 }}>
-            <span style={{ fontSize: 9, color: '#4b5563', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{newsQuery}</span>
-            <button onClick={() => fetchNews(undefined)}
-              style={{ fontSize: 9, padding: '2px 5px', borderRadius: 3, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer', flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 4, padding: '6px 8px', borderBottom: '1px solid #1e1e2e', alignItems: 'center', flexShrink: 0 }}>
+            <input
+              type="text"
+              value={newsQuery}
+              onChange={(e) => setNewsQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') fetchNews(newsQuery); }}
+              style={{
+                flex: 1, padding: '3px 7px', fontSize: 10, minWidth: 0,
+                background: '#1a1a2e', border: '1px solid #2d2d3d', borderRadius: 5,
+                color: '#e2e8f0', outline: 'none',
+              }}
+            />
+            <button onClick={() => fetchNews(newsQuery)}
+              style={{ fontSize: 9, padding: '3px 7px', borderRadius: 4, border: '1px solid #2d2d3d', background: 'transparent', color: '#9ca3af', cursor: 'pointer', flexShrink: 0 }}>
+              검색
+            </button>
+            <button onClick={() => { setNewsQuery('주식 증권'); fetchNews('주식 증권'); }}
+              style={{ fontSize: 9, padding: '3px 7px', borderRadius: 4, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer', flexShrink: 0 }}>
               전체
             </button>
             <button onClick={() => fetchNews(newsQuery)}
-              style={{ fontSize: 9, padding: '2px 5px', borderRadius: 3, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer', flexShrink: 0 }}>
-              갱신
+              style={{ fontSize: 11, padding: '2px 5px', borderRadius: 4, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer', flexShrink: 0 }}
+              title="새로고침">
+              ↻
             </button>
           </div>
           {newsLoading ? (
