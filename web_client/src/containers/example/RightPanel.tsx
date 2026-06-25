@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { stockApi, watchlistApi, AIPredictionItem, WatchlistItem } from '../../api/stock';
 
-const SIGNAL_COLOR: Record<string, string> = { 매수: '#16a34a', 매도: '#dc2626', 관망: '#d97706' };
-const SIGNAL_BG: Record<string, string> = { 매수: '#14532d', 매도: '#7f1d1d', 관망: '#78350f' };
+type RightTab = 'ai' | 'watchlist' | 'indicator';
+
+const SIGNAL_COLOR: Record<string, string> = { 매수: '#16a34a', 매도: '#dc2626', 관망: '#d97706', '매수 우세': '#4ade80', '매도 우세': '#f87171', 중립: '#6b7280' };
+const SIGNAL_BG: Record<string, string>    = { 매수: '#14532d', 매도: '#7f1d1d', 관망: '#78350f', '매수 우세': '#14532d', '매도 우세': '#7f1d1d', 중립: '#1e1e2e' };
+const SIGNAL_LABEL: Record<string, string> = { 매수: '매수', 매도: '매도', '매수 우세': '매수↑', '매도 우세': '매도↓', 중립: '중립', 관망: '관망' };
 
 interface Props {
   onSelectStock: (stockCode: string, stockName: string) => void;
@@ -32,7 +35,20 @@ const UpdateNotice: React.FC = () => (
 );
 
 const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChange }) => {
-  const [tab, setTab] = useState<'ai' | 'watchlist'>('ai');
+  const [tab, setTab] = useState<RightTab>('ai');
+
+  // 지표 예측 (today-signals) 상태
+  type TodaySignalItem = {
+    stock_code: string; stock_name: string;
+    signal: string; sub: string;
+    tags: { label: string; color: string }[];
+    close: number | null; rsi: number | null;
+    ma_align: string; macd_bull: boolean | null;
+  };
+  const [indItems, setIndItems] = useState<TodaySignalItem[]>([]);
+  const [indDays, setIndDays] = useState(1);
+  const [indLoading, setIndLoading] = useState(false);
+  const [expandedCodes, setExpandedCodes] = useState<Set<string>>(new Set());
 
   // AI 예측 상태
   const [items, setItems] = useState<AIPredictionItem[]>([]);
@@ -61,6 +77,13 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
         setWatchIds(map);
       })
       .finally(() => setWLoading(false));
+  }, []);
+
+  const fetchIndicators = useCallback((days: number) => {
+    setIndLoading(true);
+    stockApi.getTodaySignals(days)
+      .then((res) => setIndItems(res.data))
+      .finally(() => setIndLoading(false));
   }, []);
 
   useEffect(() => { fetchPredictions(''); }, []);
@@ -99,16 +122,19 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 탭 */}
       <div style={{ display: 'flex', borderBottom: '1px solid #1e1e2e', flexShrink: 0 }}>
-        {(['ai', 'watchlist'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
+        {(['ai', 'indicator', 'watchlist'] as RightTab[]).map((t) => (
+          <button key={t} onClick={() => {
+            setTab(t);
+            if (t === 'indicator' && indItems.length === 0) fetchIndicators(indDays);
+          }}
             style={{
-              flex: 1, padding: '7px 0', fontSize: 11, border: 'none', cursor: 'pointer',
+              flex: 1, padding: '7px 0', fontSize: 10, border: 'none', cursor: 'pointer',
               background: 'transparent',
               color: tab === t ? '#a5b4fc' : '#555',
               fontWeight: tab === t ? 600 : 400,
               borderBottom: tab === t ? '2px solid #6366f1' : '2px solid transparent',
             }}>
-            {t === 'ai' ? 'AI 예측' : '관심종목'}
+            {t === 'ai' ? 'AI 예측' : t === 'indicator' ? '지표 예측' : '관심종목'}
           </button>
         ))}
       </div>
@@ -188,6 +214,152 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
                         {isWatching ? '★' : '☆'}
                       </button>
                     </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 지표 예측 탭 */}
+      {tab === 'indicator' && (
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          {/* 날짜 필터 + 갱신 */}
+          <div style={{ display: 'flex', gap: 6, padding: '6px 8px', borderBottom: '1px solid #1e1e2e', alignItems: 'center', flexShrink: 0 }}>
+            <select
+              value={indDays}
+              onChange={(e) => { const d = Number(e.target.value); setIndDays(d); fetchIndicators(d); }}
+              style={{
+                background: '#1e1e2e', border: '1px solid #2d2d3d', borderRadius: 4,
+                color: '#a5b4fc', fontSize: 10, padding: '3px 6px', cursor: 'pointer', outline: 'none',
+              }}>
+              <option value={1}>오늘</option>
+              <option value={3}>최근 3일</option>
+              <option value={7}>최근 7일</option>
+            </select>
+            <span style={{ fontSize: 9, color: '#374151' }}>{indItems.length}종목</span>
+            <button onClick={() => fetchIndicators(indDays)}
+              style={{ marginLeft: 'auto', fontSize: 9, padding: '2px 5px', borderRadius: 3, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer' }}>
+              갱신
+            </button>
+          </div>
+
+          {indLoading ? (
+            <div style={{ padding: 20, fontSize: 11, color: '#666', textAlign: 'center' }}>불러오는 중...</div>
+          ) : (
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {indItems.map((it) => {
+                const isActive = selectedCode === it.stock_code;
+                const isExpanded = expandedCodes.has(it.stock_code);
+                const SIGNAL_COLORS: Record<string, { color: string; bg: string }> = {
+                  '강한 매수': { color: '#4ade80', bg: '#14532d' },
+                  'MA60 턴':   { color: '#f0abfc', bg: '#4a044e' },
+                  '골든보':    { color: '#f0abfc', bg: '#581c87' },
+                  '매수 우세': { color: '#86efac', bg: '#166534' },
+                  '음봉 주의': { color: '#fbbf24', bg: '#78350f' },
+                  '중립':      { color: '#9ca3af', bg: '#1f2937' },
+                  '매도 우세': { color: '#fca5a5', bg: '#7f1d1d' },
+                  '강한 매도': { color: '#f87171', bg: '#991b1b' },
+                  '침체(MA60)': { color: '#6b7280', bg: '#111827' },
+                  '침체(일목)': { color: '#6b7280', bg: '#111827' },
+                };
+                const sc = SIGNAL_COLORS[it.signal] ?? { color: '#9ca3af', bg: '#1f2937' };
+                const fmtClose = it.close
+                  ? it.close >= 1000000 ? `${(it.close/1000000).toFixed(1)}M`
+                    : it.close >= 1000 ? `${Math.round(it.close/1000)}K`
+                    : String(it.close)
+                  : '-';
+                return (
+                  <div key={it.stock_code} style={{ borderBottom: '1px solid #13131e' }}>
+                    {/* 종목 행 */}
+                    <div
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        padding: '6px 8px', cursor: 'pointer',
+                        background: isActive ? '#1a1a30' : 'transparent',
+                      }}
+                      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#151525'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? '#1a1a30' : 'transparent'; }}
+                    >
+                      {/* 종합신호 배지 */}
+                      <div style={{
+                        fontSize: 8, padding: '2px 4px', borderRadius: 3, flexShrink: 0,
+                        background: sc.bg, color: sc.color, fontWeight: 700, whiteSpace: 'nowrap',
+                      }}>
+                        {it.signal}
+                      </div>
+                      {/* 종목명 - 클릭시 차트 이동 */}
+                      <div style={{ flex: 1, minWidth: 0 }}
+                        onClick={() => onSelectStock(it.stock_code, it.stock_name)}>
+                        <div style={{
+                          fontSize: 11, color: isActive ? '#a5b4fc' : '#d1d5db',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          fontWeight: isActive ? 600 : 400,
+                        }}>
+                          {it.stock_name}
+                        </div>
+                        {/* 태그 인라인 표시 */}
+                        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
+                          {it.tags.slice(0, isExpanded ? undefined : 3).map((tag, ti) => (
+                            <span key={ti} style={{
+                              fontSize: 8, padding: '1px 4px', borderRadius: 3,
+                              background: tag.color + '22', color: tag.color,
+                              border: `1px solid ${tag.color}44`,
+                              fontWeight: 600, whiteSpace: 'nowrap',
+                            }}>
+                              {tag.label}
+                            </span>
+                          ))}
+                          {!isExpanded && it.tags.length > 3 && (
+                            <span style={{ fontSize: 8, color: '#4b5563' }}>+{it.tags.length - 3}</span>
+                          )}
+                        </div>
+                      </div>
+                      {/* 현재가 + 펼치기 */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+                        <span style={{ fontSize: 10, color: '#9ca3af' }}>{fmtClose}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedCodes((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(it.stock_code)) next.delete(it.stock_code);
+                              else next.add(it.stock_code);
+                              return next;
+                            });
+                          }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 9, color: '#4b5563', padding: 0, lineHeight: 1 }}>
+                          {isExpanded ? '▲' : '▼'}
+                        </button>
+                      </div>
+                    </div>
+                    {/* 펼쳐진 상세 */}
+                    {isExpanded && (
+                      <div style={{ padding: '4px 10px 8px 10px', background: '#0d0d1a', borderTop: '1px solid #1e1e2e' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
+                          {it.tags.map((tag, ti) => (
+                            <span key={ti} style={{
+                              fontSize: 9, padding: '2px 6px', borderRadius: 4,
+                              background: tag.color + '22', color: tag.color,
+                              border: `1px solid ${tag.color}44`, fontWeight: 600,
+                            }}>
+                              {tag.label}
+                            </span>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 9, color: '#4b5563' }}>{it.sub}</div>
+                        <button
+                          onClick={() => onSelectStock(it.stock_code, it.stock_name)}
+                          style={{
+                            marginTop: 6, fontSize: 9, padding: '3px 8px', borderRadius: 4,
+                            border: '1px solid #3730a3', background: 'transparent',
+                            color: '#a5b4fc', cursor: 'pointer',
+                          }}>
+                          차트 보기
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
