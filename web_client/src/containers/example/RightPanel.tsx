@@ -359,7 +359,7 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
               style={{
                 flex: 1, padding: '3px 7px', fontSize: 10, minWidth: 0,
                 background: '#1a1a2e', border: '1px solid #2d2d3d', borderRadius: 5,
-                color: '#e2e8f0', outline: 'none',
+                color: newsQuery === '주식 증권' ? '#4b5563' : '#e2e8f0', outline: 'none',
               }}
             />
             <button onClick={() => fetchNews(newsQuery)}
