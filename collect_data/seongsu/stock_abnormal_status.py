@@ -1,17 +1,12 @@
 import pandas as pd
 import numpy as np
-import tensorflow as tf
 import os
 import joblib
 import matplotlib.pyplot as plt
 
-from pymongo import MongoClient
 from dotenv import load_dotenv
-from sklearn.preprocessing import LabelEncoder
-# from sklearn.preprocessing import StandardScaler
-# from tensorflow.keras.models import Sequential
-# from tensorflow.keras.layers import LSTM, Dense , RepeatVector, TimeDistributed
 
+from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, LSTM, RepeatVector, TimeDistributed, Dense
@@ -39,10 +34,7 @@ df = pd.merge(inv,ohlcv,on=['stock_code','date'])
 df = df[[
     'stock_name','stock_code','date','foreign','individual','institution','close','high','low','open','volume','trade_value'
     ]]
-# df = df.sort_values(['date']).reset_index(drop=True)
-
-# df = df.sort_values(['stock_code', 'date'])
-
+df['date'] = pd.to_datetime(df['date'])
 # 가격: 수익률로 변환 (비정상성 완화)
 df['return'] = df.groupby('stock_code')['close'].pct_change()
 df['high_low_ratio'] = (df['high'] - df['low']) / df['close']
@@ -59,6 +51,37 @@ df['log_volume'] = np.log1p(df['volume'])
 feature_cols = ['return', 'high_low_ratio', 'open_close_ratio',
                  'foreign_ratio', 'individual_ratio', 'institution_ratio',
                  'log_trade_value', 'log_volume']
+from sklearn.preprocessing import StandardScaler
+
+# 1. 종목 코드 기준으로 train/val 분할 (종목 단위로 나누는 것을 권장)
+unique_codes = df['stock_code'].unique()
+train_codes, val_codes = train_test_split(unique_codes, test_size=0.1, random_state=42)
+
+train_df = df[df['stock_code'].isin(train_codes)].copy()
+val_df = df[df['stock_code'].isin(val_codes)].copy()
+
+# 2. Scaler는 train 데이터로만 fit
+scalers = {}
+for col in feature_cols:
+    scaler = StandardScaler()
+    train_df[col] = scaler.fit_transform(train_df[[col]])
+    scalers[col] = scaler
+
+# 3. val 데이터는 transform만 (train의 통계를 그대로 적용)
+for col in feature_cols:
+    val_df[col] = scalers[col].transform(val_df[[col]])
+# train 구간(예: 전체 기간의 앞 90%)의 통계만 사용
+cutoff_date = df['date'].quantile(0.9)
+train_stats = df[df['date'] <= cutoff_date].groupby('stock_code')[feature_cols].agg(['mean', 'std'])
+
+def normalize_with_train_stats(row, col):
+    code = row['stock_code']
+    mean = train_stats.loc[code, (col, 'mean')]
+    std = train_stats.loc[code, (col, 'std')]
+    return (row[col] - mean) / (std + 1e-8)
+
+for col in feature_cols:
+    df[col] = df.apply(lambda row: normalize_with_train_stats(row, col), axis=1)
 
 df[feature_cols] = df.groupby('stock_code')[feature_cols].transform(
     lambda x: (x - x.mean()) / (x.std() + 1e-8)
@@ -107,7 +130,7 @@ model.fit(X_train, X_train,
           batch_size=128,
           shuffle=True,
           callbacks=callbacks)
-
+2
 reconstructed = model.predict(X)
 error = np.mean((X - reconstructed) ** 2, axis=(1, 2))
 
@@ -122,6 +145,12 @@ import seaborn as sns
 
 is_anomaly = error > threshold
 
+save_dir = os.path.join(base_dir, "..", "..","model","seongsu")
+
+model.save(os.path.join(save_dir, "lstm_anomaly_model.keras"))
+joblib.dump(scalers, os.path.join(save_dir, "scaler.pkl"))
+joblib.dump(threshold, os.path.join(save_dir, "threshold.pkl"))
+print('model save')
 plt.figure(figsize=(10, 5))
 sns.kdeplot(error[~is_anomaly], label='Normal', fill=True, color='steelblue')
 sns.kdeplot(error[is_anomaly], label='Anomaly', fill=True, color='tomato')
@@ -131,7 +160,3 @@ plt.title('Error Distribution: Normal vs Anomaly')
 plt.legend()
 plt.tight_layout()
 plt.show()
-
-model.save("/Users/inainz/workspace/RichClub/model/seongsu/lstm_anomaly_model.keras")
-# joblib.dump(scaler, "/Users/inainz/workspace/RichClub//model/seongsu/scaler.pkl")
-joblib.dump(threshold, "/Users/inainz/workspace/RichClub//model/seongsu/threshold.pkl")
