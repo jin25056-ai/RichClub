@@ -25,28 +25,35 @@ def _send_email(to: str, code: str) -> None:
 
     html = f"""<!DOCTYPE html>
 <html lang="ko">
-<head><meta charset="UTF-8"></head>
-<body style="margin:0;padding:0;background-color:#0a0a14;" bgcolor="#0a0a14">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0a0a14" style="background-color:#0a0a14;">
-  <tr><td align="center" style="padding:40px 16px;">
+<head>
+<meta charset="UTF-8">
+<style>
+  body, .bg {{ background-color: #0a0a14 !important; }}
+  .card {{ background-color: #0f0f1a !important; }}
+  .code-box {{ background-color: #1a1a2e !important; }}
+</style>
+</head>
+<body class="bg" bgcolor="#0a0a14" style="margin:0;padding:0;background-color:#0a0a14 !important;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0a0a14" style="background-color:#0a0a14 !important;">
+  <tr><td align="center" style="padding:40px 16px;background-color:#0a0a14 !important;">
     <table width="480" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;width:100%;">
       <tr>
-        <td bgcolor="#0f0f1a" style="background-color:#0f0f1a;border:1px solid #1e1e2e;border-radius:12px;padding:40px 36px;">
-          <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#6366f1;letter-spacing:0.1em;font-family:-apple-system,sans-serif;">RICHCLUB</p>
-          <p style="margin:0 0 20px;font-size:22px;font-weight:700;color:#e2e8f0;font-family:-apple-system,sans-serif;">이메일 인증</p>
-          <p style="margin:0 0 28px;font-size:14px;color:#6b7280;line-height:1.7;font-family:-apple-system,sans-serif;">아래 코드를 입력해 주세요. 코드는 <span style="color:#a5b4fc;">5분</span>이 지나면 만료됩니다.</p>
+        <td class="card" bgcolor="#0f0f1a" style="background-color:#0f0f1a !important;border:1px solid #1e1e2e;border-radius:12px;padding:40px 36px;">
+          <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#6366f1 !important;letter-spacing:0.1em;font-family:-apple-system,sans-serif;">RICHCLUB</p>
+          <p style="margin:0 0 20px;font-size:22px;font-weight:700;color:#e2e8f0 !important;font-family:-apple-system,sans-serif;">이메일 인증</p>
+          <p style="margin:0 0 28px;font-size:14px;color:#6b7280 !important;line-height:1.7;font-family:-apple-system,sans-serif;">아래 코드를 입력해 주세요. 코드는 <span style="color:#a5b4fc !important;">5분</span>이 지나면 만료됩니다.</p>
           <table width="100%" cellpadding="0" cellspacing="0" border="0">
             <tr>
-              <td bgcolor="#1a1a2e" style="background-color:#1a1a2e;border:1px solid #2d2d3d;border-radius:10px;padding:24px;text-align:center;">
-                <span style="font-size:32px;font-weight:800;color:#e2e8f0;letter-spacing:14px;font-family:monospace;">{code}</span>
+              <td class="code-box" bgcolor="#1a1a2e" style="background-color:#1a1a2e !important;border:1px solid #2d2d3d;border-radius:10px;padding:24px;text-align:center;">
+                <span style="font-size:32px;font-weight:800;color:#e2e8f0 !important;letter-spacing:14px;font-family:monospace;">{code}</span>
               </td>
             </tr>
           </table>
-          <p style="margin:24px 0 0;font-size:12px;color:#374151;font-family:-apple-system,sans-serif;">본인이 요청하지 않은 경우 이 메일을 무시해 주세요.</p>
+          <p style="margin:24px 0 0;font-size:12px;color:#374151 !important;font-family:-apple-system,sans-serif;">본인이 요청하지 않은 경우 이 메일을 무시해 주세요.</p>
         </td>
       </tr>
-      <tr><td style="padding-top:16px;text-align:center;">
-        <p style="margin:0;font-size:11px;color:#1f2937;font-family:-apple-system,sans-serif;">&copy; 2026 RichClub</p>
+      <tr><td bgcolor="#0a0a14" style="background-color:#0a0a14 !important;padding-top:16px;text-align:center;">
+        <p style="margin:0;font-size:11px;color:#374151 !important;font-family:-apple-system,sans-serif;">&copy; 2026 RichClub</p>
       </td></tr>
     </table>
   </td></tr>
