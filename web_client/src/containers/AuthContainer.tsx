@@ -321,8 +321,7 @@ const AuthContainer: React.FC = () => {
   return (
     <main style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      minHeight: '100vh', background: '#0a0a14',
-      backgroundImage: 'radial-gradient(ellipse at 20% 50%, rgba(99,102,241,0.08) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(79,70,229,0.06) 0%, transparent 50%)',
+      minHeight: 'calc(100vh - 60px)', background: '#0a0a14',
     }}>
       <div style={{
         width: 400, padding: '36px 32px',
