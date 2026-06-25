@@ -20,14 +20,14 @@ async def collect_market_data() -> None:
 
 
 async def run_daily_predict() -> None:
-    """매일 장 마감 후 전 종목 예측 (KST 16:30 = UTC 07:30)"""
+    """매일 장 마감 후 전 종목 예측 (KST 15:35 = UTC 06:35)"""
     db = get_db()
     from app.ml.predictor import run_daily_prediction
     await run_daily_prediction(db)
 
 
 async def run_evaluate() -> None:
-    """매일 수익률 계산 + 월별 집계 (UTC 08:00)"""
+    """매일 수익률 계산 + 월별 집계 (UTC 07:00)"""
     db = get_db()
     from app.ml.predictor import calculate_returns, aggregate_monthly_performance
     await calculate_returns(db)
@@ -67,7 +67,7 @@ async def run_auto_retrain_if_needed() -> None:
     acc = row['correct'] / total
     logger.info(f"[auto_retrain] 최근 7일 정확도: {acc:.2%} ({row['correct']}/{total})")
     if acc < 0.50:
-        logger.warning(f"[auto_retrain] 정확도 50% 미만 → 자동 재학습 트리거")
+        logger.warning(f"[auto_retrain] 정확도 50% 미만 -> 자동 재학습 트리거")
         from app.ml.trainer import train_model
         await train_model(db, triggered_by="auto_drift")
 
@@ -78,18 +78,22 @@ def start_scheduler() -> None:
                       hour="0,6", minute="0", id="collect_market_data", replace_existing=True)
 
     # 5분봉 수집 (월~금 항상, upsert)
+    # misfire_grace_time=240: 서버 재시작으로 놓쳐도 4분 이내면 재실행
     scheduler.add_job(run_5min_candle_collection, trigger="cron",
                       day_of_week="mon-fri", minute="*/5",
-                      id="collect_5min_candles", replace_existing=True)
+                      id="collect_5min_candles", replace_existing=True,
+                      misfire_grace_time=240)
 
-    # 일별 예측 (KST 16:30 = UTC 07:30)
+    # 일별 예측 (KST 15:35 = UTC 06:35) - 장 마감 5분 후
+    # misfire_grace_time=3600: 서버 재시작 등으로 놓친 경우 1시간 이내면 재실행
     scheduler.add_job(run_daily_predict, trigger="cron",
-                      day_of_week="mon-fri", hour="7", minute="30",
-                      id="daily_predict", replace_existing=True)
+                      day_of_week="mon-fri", hour="6", minute="35",
+                      id="daily_predict", replace_existing=True,
+                      misfire_grace_time=3600)
 
-    # 예측 성능 평가 (UTC 08:00)
+    # 예측 성능 평가 (UTC 07:00) - 예측 완료 후 25분 뒤
     scheduler.add_job(run_evaluate, trigger="cron",
-                      hour="8", minute="0",
+                      hour="7", minute="0",
                       id="evaluate_predictions", replace_existing=True)
 
     # 주간 재학습 (일요일 UTC 23:00)

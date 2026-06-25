@@ -28,6 +28,24 @@ const fmtDate = (s: string) => {
   return `${m}.${day}`;
 };
 
+const UpdateNotice: React.FC = () => (
+  <div style={{
+    padding: '5px 10px',
+    borderBottom: '1px solid #1e1e2e',
+    fontSize: 10,
+    color: '#6b7280',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  }}>
+    <span style={{ color: '#4b5563', fontWeight: 600, flexShrink: 0 }}>갱신 주기</span>
+    <span style={{ whiteSpace: 'nowrap' }}>
+      차트 · AI 예측&nbsp;
+      <span style={{ color: '#818cf8' }}>매일 15:35</span>
+    </span>
+  </div>
+);
+
 const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) => {
   const [items, setItems] = useState<AIPredictionItem[]>([]);
   const [filter, setFilter] = useState<SignalFilter>('');
@@ -49,6 +67,9 @@ const AIPredictionsSection: React.FC<Props> = ({ onSelectStock, selectedCode }) 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* 갱신 안내 */}
+      <UpdateNotice />
+
       {/* 필터 */}
       <div style={{ display: 'flex', gap: 4, padding: '6px 8px', borderBottom: '1px solid #1e1e2e', flexWrap: 'wrap' }}>
         {(['', '매수', '매도', '관망'] as SignalFilter[]).map((s) => (

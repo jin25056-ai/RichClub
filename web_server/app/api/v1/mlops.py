@@ -91,7 +91,7 @@ async def get_signal_stats(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """매수→매도 실현 수익률 기반 기간별 성능"""
+    """매수->매도 실현 수익률 기반 기간별 성능"""
     since = datetime.utcnow() - timedelta(days=days)
     pipeline = [
         {'$match': {'signal': '매수', 'ret_realized': {'$ne': None}, 'predicted_at': {'$gte': since}}},
@@ -174,7 +174,7 @@ async def get_stock_performance(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """종목별 매수→매도 실현 수익률 집계"""
+    """종목별 매수->매도 실현 수익률 집계"""
     from collections import defaultdict
     since = datetime.utcnow() - timedelta(days=days) if days < 9999 else None
 
@@ -241,16 +241,43 @@ async def get_stock_performance(
 
     result.sort(key=lambda x: x['avg_ret'], reverse=True)
     return result[:100]
-async def trigger_calculate_returns(
+
+
+@router.post("/predict/run")
+async def trigger_predict(
+    background_tasks: BackgroundTasks,
+    target_date: Optional[str] = None,
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """
+    전 종목 예측 수동 실행.
+    target_date: YYYY-MM-DD 형식. 생략 시 오늘 날짜.
+    백그라운드로 실행되며 즉시 응답 반환.
+    """
+    from app.ml.predictor import run_daily_prediction
+
+    async def run():
+        await run_daily_prediction(db, target_date=target_date)
+
+    background_tasks.add_task(run)
+    run_date = target_date or datetime.now().strftime('%Y-%m-%d')
+    return {'status': 'started', 'target_date': run_date}
+
+
+@router.post("/evaluate/run")
+async def trigger_evaluate(
     background_tasks: BackgroundTasks,
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
     """수익률 계산 + 월별 집계 수동 실행"""
     from app.ml.predictor import calculate_returns, aggregate_monthly_performance
+
     async def run():
         await calculate_returns(db)
         await aggregate_monthly_performance(db)
+
     background_tasks.add_task(run)
     return {'status': 'started'}
 

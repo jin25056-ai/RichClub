@@ -1,6 +1,7 @@
 """
 글로벌 시장 현황 + 승률 테스트 API
 - Yahoo Finance 429 방지: 서버 메모리 캐시 10분
+- MA60 하락 구간: 매수 금지 (침체 구간)
 """
 import asyncio
 import time
@@ -255,6 +256,52 @@ def _to_date(dt) -> datetime:
     return dt
 
 
+def _ma60_falling(ma60, prev_ma60) -> bool:
+    """MA60 하락 중 여부 - 침체 구간 판단"""
+    if ma60 is None or prev_ma60 is None:
+        return False
+    return float(ma60) < float(prev_ma60)
+
+
+def _calc_ichimoku_span(highs: list, lows: list, idx: int) -> tuple:
+    """일목균형표 선행스팬 A, B 계산 (idx 기준)"""
+    # 전환선 (9일): (9일 고가 + 9일 저가) / 2
+    if idx >= 8:
+        tenkan = (max(highs[idx-8:idx+1]) + min(lows[idx-8:idx+1])) / 2
+    else:
+        tenkan = None
+    # 기준선 (26일): (26일 고가 + 26일 저가) / 2
+    if idx >= 25:
+        kijun = (max(highs[idx-25:idx+1]) + min(lows[idx-25:idx+1])) / 2
+    else:
+        kijun = None
+    # 선행스팬 A = (전환선 + 기준선) / 2
+    span_a = (tenkan + kijun) / 2 if tenkan is not None and kijun is not None else None
+    # 선행스팬 B (52일): (52일 고가 + 52일 저가) / 2
+    if idx >= 51:
+        span_b = (max(highs[idx-51:idx+1]) + min(lows[idx-51:idx+1])) / 2
+    else:
+        span_b = None
+    return span_a, span_b
+
+
+def _is_ichimoku_stagnant(close: float, span_a, span_b) -> bool:
+    """
+    일목균형표 침체 구간 판단 (1000% 침체 조건)
+    - 선행스팬 역배열: spanA < spanB
+    - 캔들이 선행스팬 A 아래: close < spanA
+    둘 다 충족 시 침체
+    """
+    if span_a is None or span_b is None or close is None:
+        return False
+    span_a = float(span_a)
+    span_b = float(span_b)
+    close = float(close)
+    span_reversed = span_a < span_b   # 선행스팬 역배열
+    below_span_a = close < span_a     # 캔들이 spanA 아래
+    return span_reversed and below_span_a
+
+
 def _build_winrate_response(
     stock_code, stock_name, period, hold_days,
     realized_returns, unrealized_positions, trades, signal_label
@@ -295,7 +342,40 @@ def _build_winrate_response(
     )
 
 
-@router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트 (AI)")
+async def _load_ichimoku_map(db, stock_codes: list, since: datetime) -> dict:
+    """
+    종목별 일목균형표 선행스팬 맵 반환
+    반환: {stock_code: {date_str: (span_a, span_b)}}
+    일목균형표 계산을 위해 since보다 최소 77일(52+26일) 앞 데이터부터 조회
+    """
+    fetch_since = since - timedelta(days=110)
+    ichimoku_map: dict = {}
+    for sc in stock_codes:
+        docs = [doc async for doc in db.total_trading_signals.find(
+            {"stock_code": sc, "predicted_at": {"$gte": fetch_since}},
+            sort=[("predicted_at", 1)],
+            projection={"predicted_at": 1, "high": 1, "low": 1, "close": 1}
+        )]
+        if not docs:
+            continue
+        highs = [float(d["high"]) if d.get("high") is not None else None for d in docs]
+        lows  = [float(d["low"])  if d.get("low")  is not None else None for d in docs]
+        entry: dict = {}
+        for i, d in enumerate(docs):
+            hs = [h for h in highs[max(0, i-77):i+1] if h is not None]
+            ls = [l for l in lows[max(0, i-77):i+1]  if l is not None]
+            span_a, span_b = _calc_ichimoku_span(
+                [h if h is not None else 0 for h in highs],
+                [l if l is not None else 0 for l in lows],
+                i
+            )
+            date_str = _to_date(d.get("predicted_at")).strftime("%Y-%m-%d")
+            entry[date_str] = (span_a, span_b)
+        ichimoku_map[sc] = entry
+    return ichimoku_map
+
+
+@router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트 (AI) - 침체구간 제외")
 async def get_win_rate(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
@@ -307,7 +387,7 @@ async def get_win_rate(
 ):
     """
     AI 승률 테스트
-    - 매수: AI 매수 신호
+    - 매수: AI 매수 신호 + MA60 하락 구간 제외
     - 매도: AI 매도 신호
     """
     if period not in PERIOD_DAYS_MAP:
@@ -331,6 +411,9 @@ async def get_win_rate(
         if sc:
             sc_docs[sc].append(doc)
 
+    # 일목균형표 침체 구간 사전 계산
+    ichimoku_map = await _load_ichimoku_map(db, list(sc_docs.keys()), since)
+
     trades: list = []
     realized_returns: list = []
     unrealized_positions: list = []
@@ -338,18 +421,25 @@ async def get_win_rate(
     for sc, sdocs in sc_docs.items():
         position = None
         latest_price = None
+        prev_ma60 = None
+        ichi = ichimoku_map.get(sc, {})
 
         for doc in sdocs:
             signal = doc.get("signal", "관망")
             dt = _to_date(doc.get("predicted_at"))
             close = doc.get("close")
+            ma60 = doc.get("ma60")
             if close is None:
                 continue
             close = float(close)
             latest_price = close
             date_str = dt.strftime("%Y-%m-%d")
 
-            if signal == "매수" and position is None:
+            span_a, span_b = ichi.get(date_str, (None, None))
+            stagnant = _is_ichimoku_stagnant(close, span_a, span_b) or _ma60_falling(ma60, prev_ma60)
+
+            # 침체 구간은 매수 금지
+            if signal == "매수" and position is None and not stagnant:
                 position = {"buy_date": date_str, "buy_price": close}
             elif signal == "매도" and position is not None:
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -360,6 +450,9 @@ async def get_win_rate(
                 realized_returns.append(ret_pct)
                 position = None
 
+            if ma60 is not None:
+                prev_ma60 = float(ma60)
+
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
             unrealized_positions.append(unrealized_pct)
@@ -369,10 +462,11 @@ async def get_win_rate(
             ))
 
     return _build_winrate_response(stock_code, stock_name, period, hold_days,
-                                   realized_returns, unrealized_positions, trades, "매수(AI)→매도(AI)")
+                                   realized_returns, unrealized_positions, trades,
+                                   "매수(AI+침체제외)→매도(AI)")
 
 
-@router.get("/winrate/simple", response_model=WinRateResponse, summary="승률 테스트 (AI 매수 + 5일선 매도)")
+@router.get("/winrate/simple", response_model=WinRateResponse, summary="승률 테스트 (AI 매수 + 5일선 매도) - MA60 하락 제외")
 async def get_win_rate_simple(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
@@ -384,7 +478,7 @@ async def get_win_rate_simple(
 ):
     """
     단순 승률 테스트
-    - 매수: AI 매수 신호
+    - 매수: AI 매수 신호 + MA60 하락 구간 제외
     - 매도: 5일선 꺾임(ma5 < 전날 ma5)
     """
     if period not in PERIOD_DAYS_MAP:
@@ -408,6 +502,8 @@ async def get_win_rate_simple(
         if sc:
             sc_docs[sc].append(doc)
 
+    ichimoku_map = await _load_ichimoku_map(db, list(sc_docs.keys()), since)
+
     trades: list = []
     realized_returns: list = []
     unrealized_positions: list = []
@@ -416,22 +512,27 @@ async def get_win_rate_simple(
         position = None
         latest_price = None
         prev_ma5 = None
+        prev_ma60 = None
+        ichi = ichimoku_map.get(sc, {})
 
         for doc in sdocs:
             signal = doc.get("signal", "관망")
             dt = _to_date(doc.get("predicted_at"))
             close = doc.get("close")
             ma5 = doc.get("ma5")
+            ma60 = doc.get("ma60")
             if close is None:
                 continue
             close = float(close)
             latest_price = close
             date_str = dt.strftime("%Y-%m-%d")
 
+            span_a, span_b = ichi.get(date_str, (None, None))
+            stagnant = _is_ichimoku_stagnant(close, span_a, span_b) or _ma60_falling(ma60, prev_ma60)
             ma5_turning_down = (ma5 is not None and prev_ma5 is not None
                                 and float(ma5) < float(prev_ma5))
 
-            if signal == "매수" and position is None:
+            if signal == "매수" and position is None and not stagnant:
                 position = {"buy_date": date_str, "buy_price": close}
             elif ma5_turning_down and position is not None:
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -444,6 +545,8 @@ async def get_win_rate_simple(
 
             if ma5 is not None:
                 prev_ma5 = float(ma5)
+            if ma60 is not None:
+                prev_ma60 = float(ma60)
 
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -455,10 +558,10 @@ async def get_win_rate_simple(
 
     return _build_winrate_response(stock_code, stock_name, period, hold_days,
                                    realized_returns, unrealized_positions, trades,
-                                   "매수(AI)→매도(5일선꺾임)")
+                                   "매수(AI+침체제외)→매도(5일선꺾임)")
 
 
-@router.get("/winrate/combined", response_model=WinRateResponse, summary="승률 테스트 (AI+정배열 매수)")
+@router.get("/winrate/combined", response_model=WinRateResponse, summary="승률 테스트 (AI+정배열 매수) - MA60 하락 제외")
 async def get_win_rate_combined(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
@@ -470,7 +573,7 @@ async def get_win_rate_combined(
 ):
     """
     AI+지표 동시 매수 승률 테스트
-    - 매수: AI 매수 신호 + MA 정배열(ma5>ma20>ma60) 동시 충족
+    - 매수: AI 매수 신호 + MA 정배열(ma5>ma20>ma60) + MA60 상승 중
     - 매도: AI 매도 신호 or MA 역배열(ma5<ma20<ma60)
     """
     if period not in PERIOD_DAYS_MAP:
@@ -494,6 +597,8 @@ async def get_win_rate_combined(
         if sc:
             sc_docs[sc].append(doc)
 
+    ichimoku_map = await _load_ichimoku_map(db, list(sc_docs.keys()), since)
+
     trades: list = []
     realized_returns: list = []
     unrealized_positions: list = []
@@ -501,6 +606,8 @@ async def get_win_rate_combined(
     for sc, sdocs in sc_docs.items():
         position = None
         latest_price = None
+        prev_ma60 = None
+        ichi = ichimoku_map.get(sc, {})
 
         for doc in sdocs:
             signal = doc.get("signal", "관망")
@@ -515,12 +622,14 @@ async def get_win_rate_combined(
             latest_price = close
             date_str = dt.strftime("%Y-%m-%d")
 
+            span_a, span_b = ichi.get(date_str, (None, None))
+            stagnant = _is_ichimoku_stagnant(close, span_a, span_b) or _ma60_falling(ma60, prev_ma60)
             ma_bullish = (ma5 is not None and ma20 is not None and ma60 is not None
                           and float(ma5) > float(ma20) > float(ma60))
             ma_bearish = (ma5 is not None and ma20 is not None and ma60 is not None
                           and float(ma5) < float(ma20) < float(ma60))
 
-            if signal == "매수" and ma_bullish and position is None:
+            if signal == "매수" and ma_bullish and position is None and not stagnant:
                 position = {"buy_date": date_str, "buy_price": close}
             elif position is not None and (signal == "매도" or ma_bearish):
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -530,6 +639,9 @@ async def get_win_rate_combined(
                 ))
                 realized_returns.append(ret_pct)
                 position = None
+
+            if ma60 is not None:
+                prev_ma60 = float(ma60)
 
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -541,10 +653,10 @@ async def get_win_rate_combined(
 
     return _build_winrate_response(stock_code, stock_name, period, hold_days,
                                    realized_returns, unrealized_positions, trades,
-                                   "매수(AI+정배열)→매도(AI or 역배열)")
+                                   "매수(AI+정배열+침체제외)→매도(AI or 역배열)")
 
 
-@router.get("/winrate/indicator", response_model=WinRateResponse, summary="승률 테스트 (지표만)")
+@router.get("/winrate/indicator", response_model=WinRateResponse, summary="승률 테스트 (지표만) - MA60 하락 제외")
 async def get_win_rate_indicator(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
@@ -556,8 +668,8 @@ async def get_win_rate_indicator(
 ):
     """
     지표만 승률 테스트 (AI 신호 무시)
-    - 매수: MA 정배열 첫 진입 시점(ma5>ma20>ma60)
-    - 매도: MA 역배열 전환 시점(ma5<ma20<ma60)
+    - 매수: MA 정배열 첫 진입 + MA60 상승 중
+    - 매도: MA 역배열 전환
     """
     if period not in PERIOD_DAYS_MAP:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
@@ -580,6 +692,8 @@ async def get_win_rate_indicator(
         if sc:
             sc_docs[sc].append(doc)
 
+    ichimoku_map = await _load_ichimoku_map(db, list(sc_docs.keys()), since)
+
     trades: list = []
     realized_returns: list = []
     unrealized_positions: list = []
@@ -588,6 +702,8 @@ async def get_win_rate_indicator(
         position = None
         latest_price = None
         prev_in_bullish = False
+        prev_ma60 = None
+        ichi = ichimoku_map.get(sc, {})
 
         for doc in sdocs:
             dt = _to_date(doc.get("predicted_at"))
@@ -601,12 +717,14 @@ async def get_win_rate_indicator(
             latest_price = close
             date_str = dt.strftime("%Y-%m-%d")
 
+            span_a, span_b = ichi.get(date_str, (None, None))
+            stagnant = _is_ichimoku_stagnant(close, span_a, span_b) or _ma60_falling(ma60, prev_ma60)
             ma_bullish = (ma5 is not None and ma20 is not None and ma60 is not None
                           and float(ma5) > float(ma20) > float(ma60))
             ma_bearish = (ma5 is not None and ma20 is not None and ma60 is not None
                           and float(ma5) < float(ma20) < float(ma60))
 
-            if ma_bullish and not prev_in_bullish and position is None:
+            if ma_bullish and not prev_in_bullish and position is None and not stagnant:
                 position = {"buy_date": date_str, "buy_price": close}
             elif ma_bearish and position is not None:
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -618,6 +736,8 @@ async def get_win_rate_indicator(
                 position = None
 
             prev_in_bullish = ma_bullish
+            if ma60 is not None:
+                prev_ma60 = float(ma60)
 
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
@@ -629,4 +749,4 @@ async def get_win_rate_indicator(
 
     return _build_winrate_response(stock_code, stock_name, period, hold_days,
                                    realized_returns, unrealized_positions, trades,
-                                   "매수(MA정배열)→매도(MA역배열)")
+                                   "매수(MA정배열+침체제외)→매도(MA역배열)")
