@@ -6,6 +6,7 @@ type TabType = 'ai' | 'simple' | 'combined' | 'indicator';
 interface Props {
   compact?: boolean;
   stockCode?: string;
+  modelId?: string;
   onTabChange?: (tab: 'ai' | 'simple') => void;
 }
 
@@ -28,7 +29,7 @@ const TABS: { key: TabType; label: string; desc: string }[] = [
   { key: 'ai',        label: 'AI',      desc: '매수: AI + MA60 상승 / 매도: AI 신호  (침체구간제외)' },
   { key: 'simple',    label: '5일선',   desc: '매수: AI + MA60 상승 / 매도: 5일선 꺾임  (침체구간제외)' },
   { key: 'combined',  label: 'AI+지표', desc: '매수: AI + MA정배열 + MA60상승 / 매도: AI or MA역배열' },
-  { key: 'indicator', label: '지표',    desc: '매수: MA정배열+MA60상승 진입 / 매도: MA역배열' },
+  { key: 'indicator', label: '지표',    desc: '매수: MA정배열+MA60상승 진입 / 매도: MA역배열 (AI 모델 무관)' },
 ];
 
 const getApiFn = (t: TabType) => {
@@ -38,7 +39,7 @@ const getApiFn = (t: TabType) => {
   return marketApi.getWinRate;
 };
 
-const WinRateSection: React.FC<Props> = ({ compact, stockCode, onTabChange }) => {
+const WinRateSection: React.FC<Props> = ({ compact, stockCode, modelId, onTabChange }) => {
   const [tab, setTab] = useState<TabType>('ai');
   const [period, setPeriod] = useState('3m');
   const [useCustomDate, setUseCustomDate] = useState(false);
@@ -51,13 +52,18 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode, onTabChange }) =>
 
   const fetchData = (p: string, sc?: string, sd?: string, ed?: string, t: TabType = tab) => {
     setLoading(true);
-    getApiFn(t)({
+    const params: any = {
       stock_code: sc || undefined,
       period: p,
       hold_days: 5,
       start_date: sd || undefined,
       end_date: ed || undefined,
-    })
+    };
+    // indicator 탭은 AI 모델과 무관 - model_id 미전달
+    if (t !== 'indicator') {
+      params.model_id = modelId || 'ju-model-v2';
+    }
+    getApiFn(t)(params)
       .then((res: { data: { results: WinRateResult[]; trades: TradeRecord[] } }) => {
         setResults(res.data.results);
         setTrades(res.data.trades || []);
@@ -74,7 +80,7 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode, onTabChange }) =>
 
   useEffect(() => {
     if (stockCode) fetchData(period, stockCode);
-  }, [stockCode]);
+  }, [stockCode, modelId]);
 
   const handlePeriod = (p: string) => {
     setPeriod(p);
@@ -90,8 +96,8 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode, onTabChange }) =>
 
   const r = results[0] ?? null;
   const cumPct = r?.cumulative_return_pct ?? null;
-  const completedTrades = trades.filter((t) => t.return_pct != null);
-  const openTrades = trades.filter((t) => t.unrealized_pct != null);
+  const completedTrades = trades.filter((t: TradeRecord) => t.return_pct != null);
+  const openTrades = trades.filter((t: TradeRecord) => t.unrealized_pct != null);
 
   const principal = parseFloat(inputAmt.replace(/,/g, '')) || 0;
   const finalAmt = cumPct != null && principal > 0 ? principal * (1 + cumPct / 100) : null;
@@ -103,7 +109,6 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode, onTabChange }) =>
 
   return (
     <div>
-      {/* 탭 */}
       <div style={{ marginBottom: 4 }}>
         <div style={{ display: 'flex', gap: 3, marginBottom: 4 }}>
           {TABS.map(({ key, label }) => (
@@ -118,7 +123,6 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode, onTabChange }) =>
         <div style={{ fontSize: 9, color: '#4b5563' }}>{activeDesc}</div>
       </div>
 
-      {/* 기간 선택 */}
       <div style={{ marginBottom: 8 }}>
         <div style={{ display: 'flex', gap: 3, marginBottom: 5, alignItems: 'center' }}>
           <span style={{ fontSize: 9, color: '#555' }}>기간</span>
@@ -159,7 +163,7 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode, onTabChange }) =>
             <div style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 9, color: '#555', marginBottom: 5 }}>거래 내역</div>
 
-              {completedTrades.map((t, i) => (
+              {completedTrades.map((t: TradeRecord, i: number) => (
                 <div key={i} style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   padding: '5px 8px', marginBottom: 3, borderRadius: 5,
@@ -178,7 +182,7 @@ const WinRateSection: React.FC<Props> = ({ compact, stockCode, onTabChange }) =>
                 </div>
               ))}
 
-              {openTrades.map((t, i) => (
+              {openTrades.map((t: TradeRecord, i: number) => (
                 <div key={i} style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   padding: '5px 8px', marginBottom: 3, borderRadius: 5,
