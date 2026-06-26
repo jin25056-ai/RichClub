@@ -24,7 +24,6 @@ def _db() -> AsyncIOMotorDatabase:
     return get_db()
 
 
-# 스키마
 class GlobalMarketItem(BaseModel):
     symbol: str
     name: str
@@ -72,7 +71,6 @@ class WinRateResponse(BaseModel):
     updated_at: datetime
 
 
-# 캐시 (10분)
 _cache: dict = {"data": None, "ts": 0}
 CACHE_TTL = 600
 
@@ -236,12 +234,10 @@ async def get_global_market(_: dict = Depends(get_current_user)):
     return data
 
 
-# 승률 테스트
 PERIOD_DAYS_MAP = {"1m": 30, "3m": 90, "6m": 180, "all": 99999}
 
 
 def _parse_date_input(s: str) -> datetime:
-    """YYMMDD 또는 YYYY-MM-DD 형식을 파싱"""
     s = s.strip()
     if len(s) == 6 and s.isdigit():
         s = f"20{s[:2]}-{s[2:4]}-{s[4:6]}"
@@ -257,27 +253,21 @@ def _to_date(dt) -> datetime:
 
 
 def _ma60_falling(ma60, prev_ma60) -> bool:
-    """MA60 하락 중 여부 - 침체 구간 판단"""
     if ma60 is None or prev_ma60 is None:
         return False
     return float(ma60) < float(prev_ma60)
 
 
 def _calc_ichimoku_span(highs: list, lows: list, idx: int) -> tuple:
-    """일목균형표 선행스팬 A, B 계산 (idx 기준)"""
-    # 전환선 (9일): (9일 고가 + 9일 저가) / 2
     if idx >= 8:
         tenkan = (max(highs[idx-8:idx+1]) + min(lows[idx-8:idx+1])) / 2
     else:
         tenkan = None
-    # 기준선 (26일): (26일 고가 + 26일 저가) / 2
     if idx >= 25:
         kijun = (max(highs[idx-25:idx+1]) + min(lows[idx-25:idx+1])) / 2
     else:
         kijun = None
-    # 선행스팬 A = (전환선 + 기준선) / 2
     span_a = (tenkan + kijun) / 2 if tenkan is not None and kijun is not None else None
-    # 선행스팬 B (52일): (52일 고가 + 52일 저가) / 2
     if idx >= 51:
         span_b = (max(highs[idx-51:idx+1]) + min(lows[idx-51:idx+1])) / 2
     else:
@@ -286,20 +276,12 @@ def _calc_ichimoku_span(highs: list, lows: list, idx: int) -> tuple:
 
 
 def _is_ichimoku_stagnant(close: float, span_a, span_b) -> bool:
-    """
-    일목균형표 침체 구간 판단 (1000% 침체 조건)
-    - 선행스팬 역배열: spanA < spanB
-    - 캔들이 선행스팬 A 아래: close < spanA
-    둘 다 충족 시 침체
-    """
     if span_a is None or span_b is None or close is None:
         return False
     span_a = float(span_a)
     span_b = float(span_b)
     close = float(close)
-    span_reversed = span_a < span_b   # 선행스팬 역배열
-    below_span_a = close < span_a     # 캔들이 spanA 아래
-    return span_reversed and below_span_a
+    return (span_a < span_b) and (close < span_a)
 
 
 def _build_winrate_response(
@@ -343,11 +325,6 @@ def _build_winrate_response(
 
 
 async def _load_ichimoku_map(db, stock_codes: list, since: datetime) -> dict:
-    """
-    종목별 일목균형표 선행스팬 맵 반환
-    반환: {stock_code: {date_str: (span_a, span_b)}}
-    일목균형표 계산을 위해 since보다 최소 77일(52+26일) 앞 데이터부터 조회
-    """
     fetch_since = since - timedelta(days=110)
     ichimoku_map: dict = {}
     for sc in stock_codes:
@@ -362,8 +339,6 @@ async def _load_ichimoku_map(db, stock_codes: list, since: datetime) -> dict:
         lows  = [float(d["low"])  if d.get("low")  is not None else None for d in docs]
         entry: dict = {}
         for i, d in enumerate(docs):
-            hs = [h for h in highs[max(0, i-77):i+1] if h is not None]
-            ls = [l for l in lows[max(0, i-77):i+1]  if l is not None]
             span_a, span_b = _calc_ichimoku_span(
                 [h if h is not None else 0 for h in highs],
                 [l if l is not None else 0 for l in lows],
@@ -382,14 +357,11 @@ async def get_win_rate(
     hold_days: int = Query(5, ge=1, le=30),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    model_id: Optional[str] = Query(None),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """
-    AI 승률 테스트
-    - 매수: AI 매수 신호 + MA60 하락 구간 제외
-    - 매도: AI 매도 신호
-    """
+    """AI 매수 + MA60 침체 제외 + AI 매도"""
     if period not in PERIOD_DAYS_MAP:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
 
@@ -397,6 +369,8 @@ async def get_win_rate(
     until = (_parse_date_input(end_date) + timedelta(days=1)) if end_date else datetime.now(timezone.utc) + timedelta(days=1)
 
     query: dict = {"predicted_at": {"$gte": since, "$lt": until}}
+    if model_id:
+        query["model_id"] = model_id
     if stock_code:
         query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
 
@@ -411,7 +385,6 @@ async def get_win_rate(
         if sc:
             sc_docs[sc].append(doc)
 
-    # 일목균형표 침체 구간 사전 계산
     ichimoku_map = await _load_ichimoku_map(db, list(sc_docs.keys()), since)
 
     trades: list = []
@@ -438,7 +411,6 @@ async def get_win_rate(
             span_a, span_b = ichi.get(date_str, (None, None))
             stagnant = _is_ichimoku_stagnant(close, span_a, span_b) or _ma60_falling(ma60, prev_ma60)
 
-            # 침체 구간은 매수 금지
             if signal == "매수" and position is None and not stagnant:
                 position = {"buy_date": date_str, "buy_price": close}
             elif signal == "매도" and position is not None:
@@ -473,14 +445,11 @@ async def get_win_rate_simple(
     hold_days: int = Query(5, ge=1, le=30),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    model_id: Optional[str] = Query(None),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """
-    단순 승률 테스트
-    - 매수: AI 매수 신호 + MA60 하락 구간 제외
-    - 매도: 5일선 꺾임(ma5 < 전날 ma5)
-    """
+    """AI 매수 + MA60 침체 제외 + 5일선 꺾임 매도"""
     if period not in PERIOD_DAYS_MAP:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
 
@@ -488,6 +457,8 @@ async def get_win_rate_simple(
     until = (_parse_date_input(end_date) + timedelta(days=1)) if end_date else datetime.now(timezone.utc) + timedelta(days=1)
 
     query: dict = {"predicted_at": {"$gte": since, "$lt": until}}
+    if model_id:
+        query["model_id"] = model_id
     if stock_code:
         query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
 
@@ -568,14 +539,11 @@ async def get_win_rate_combined(
     hold_days: int = Query(5, ge=1, le=30),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    model_id: Optional[str] = Query(None),
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """
-    AI+지표 동시 매수 승률 테스트
-    - 매수: AI 매수 신호 + MA 정배열(ma5>ma20>ma60) + MA60 상승 중
-    - 매도: AI 매도 신호 or MA 역배열(ma5<ma20<ma60)
-    """
+    """AI + MA 정배열 매수 + AI or MA 역배열 매도"""
     if period not in PERIOD_DAYS_MAP:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
 
@@ -583,6 +551,8 @@ async def get_win_rate_combined(
     until = (_parse_date_input(end_date) + timedelta(days=1)) if end_date else datetime.now(timezone.utc) + timedelta(days=1)
 
     query: dict = {"predicted_at": {"$gte": since, "$lt": until}}
+    if model_id:
+        query["model_id"] = model_id
     if stock_code:
         query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
 
@@ -656,7 +626,7 @@ async def get_win_rate_combined(
                                    "매수(AI+정배열+침체제외)→매도(AI or 역배열)")
 
 
-@router.get("/winrate/indicator", response_model=WinRateResponse, summary="승률 테스트 (지표만) - MA60 하락 제외")
+@router.get("/winrate/indicator", response_model=WinRateResponse, summary="승률 테스트 (지표만) - AI 모델 무관")
 async def get_win_rate_indicator(
     stock_code: Optional[str] = Query(None),
     period: str = Query("3m"),
@@ -666,18 +636,18 @@ async def get_win_rate_indicator(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """
-    지표만 승률 테스트 (AI 신호 무시)
-    - 매수: MA 정배열 첫 진입 + MA60 상승 중
-    - 매도: MA 역배열 전환
-    """
+    """지표만 승률 테스트 - AI 모델과 무관하게 MA 정배열/역배열만 사용"""
     if period not in PERIOD_DAYS_MAP:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
 
     since = _parse_date_input(start_date) if start_date else datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS_MAP[period])
     until = (_parse_date_input(end_date) + timedelta(days=1)) if end_date else datetime.now(timezone.utc) + timedelta(days=1)
 
-    query: dict = {"predicted_at": {"$gte": since, "$lt": until}}
+    # 지표 탭은 model_id 필터 없이 전체 데이터 사용 (중복 제거를 위해 ju-model-v2 기준)
+    query: dict = {
+        "predicted_at": {"$gte": since, "$lt": until},
+        "model_id": "ju-model-v2",
+    }
     if stock_code:
         query["$or"] = [{"stock_code": stock_code}, {"stock_name": stock_code}]
 

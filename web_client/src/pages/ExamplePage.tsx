@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import GlobalMarketSection from '../containers/example/GlobalMarketSection';
 import RightPanel from '../containers/example/RightPanel';
@@ -242,12 +242,12 @@ const ExamplePage: React.FC = () => {
         <div style={{ flex: 1, padding: '0 12px', overflow: 'hidden' }}>
           {activeTab === 'chart' && (
             <div style={{ ...panel, height: 'calc(100vh - 130px)', overflow: 'hidden' }}>
-              <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} modelId={selectedModel} />
+              <StockSearchSection key={selectedModel} initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} modelId={selectedModel} />
             </div>
           )}
           {activeTab === 'ai' && (
             <div style={{ ...panel, minHeight: '60vh' }}>
-              <RightPanel onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} modelId={selectedModel} />
+              <RightPanel key={selectedModel} onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} modelId={selectedModel} />
             </div>
           )}
           {activeTab === 'market' && (
@@ -262,7 +262,7 @@ const ExamplePage: React.FC = () => {
           {activeTab === 'winrate' && (
             <div style={panel}>
               <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 8 }}>승률 테스트</div>
-              <WinRateSection compact stockCode={selectedStock?.code} onTabChange={setSellMode} />
+              <WinRateSection compact stockCode={selectedStock?.code} modelId={selectedModel} onTabChange={setSellMode} />
             </div>
           )}
         </div>
@@ -284,7 +284,6 @@ const ExamplePage: React.FC = () => {
       {pricingModal}
       <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
         <div style={{ width: 190, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
-          {/* 모델 선택 드롭다운 */}
           {models.length > 0 && (
             <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '8px 12px' }}>
               <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 6 }}>AI 모델</div>
@@ -326,14 +325,14 @@ const ExamplePage: React.FC = () => {
                 </span>
               )}
             </div>
-            <WinRateSection compact stockCode={selectedStock?.code} onTabChange={setSellMode} />
+            <WinRateSection compact stockCode={selectedStock?.code} modelId={selectedModel} onTabChange={setSellMode} />
           </div>
         </div>
         <div style={{ flex: 1, minWidth: 0, ...panel, overflow: 'hidden' }}>
-          <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} onPriceUpdate={setCurrentPrice} modelId={selectedModel} />
+          <StockSearchSection key={selectedModel} initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} onPriceUpdate={setCurrentPrice} modelId={selectedModel} />
         </div>
         <div style={{ width: 195, flexShrink: 0, ...panel, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
-          <RightPanel onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} modelId={selectedModel} />
+          <RightPanel key={selectedModel} onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} modelId={selectedModel} />
         </div>
       </div>
     </div>
