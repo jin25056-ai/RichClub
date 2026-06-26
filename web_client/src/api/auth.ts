@@ -19,3 +19,9 @@ export const logout = (): void => {
   localStorage.removeItem('access_token');
   localStorage.removeItem('refresh_token');
 };
+
+export const subscribePlan = (plan_id: string): Promise<{ message: string; plan: string; subscribed_at: string }> =>
+  apiClient.post('/api/v1/subscription', { plan_id }).then((res) => res.data);
+
+export const cancelSubscription = (): Promise<{ message: string }> =>
+  apiClient.delete('/api/v1/subscription').then((res) => res.data);

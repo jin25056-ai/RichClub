@@ -37,7 +37,6 @@ const UpdateNotice: React.FC = () => (
 const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChange }) => {
   const [tab, setTab] = useState<RightTab>('ai');
 
-  // 지표 예측 (today-signals) 상태
   type TodaySignalItem = {
     stock_code: string; stock_name: string;
     signal: string; sub: string;
@@ -50,14 +49,12 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
   const [indLoading, setIndLoading] = useState(false);
   const [expandedCodes] = useState<Set<string>>(new Set());
 
-  // AI 예측 상태
   const [items, setItems] = useState<AIPredictionItem[]>([]);
   const [filter, setFilter] = useState<'' | '매수' | '매도' | '관망'>('');
   const [loading, setLoading] = useState(false);
 
-  // 관심종목 상태
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
-  const [watchIds, setWatchIds] = useState<Record<string, string>>({}); // code -> id
+  const [watchIds, setWatchIds] = useState<Record<string, string>>({});
   const [wLoading, setWLoading] = useState(false);
 
   const fetchPredictions = (signal: '' | '매수' | '매도' | '관망') => {
@@ -217,7 +214,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
                           </div>
                         )}
                       </div>
-                      {/* 별표 버튼 */}
                       <button
                         onClick={(e) => toggleWatch(e, item)}
                         title={isWatching ? '관심종목 제거' : '관심종목 추가'}
@@ -240,7 +236,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
       {/* 지표 예측 탭 */}
       {tab === 'indicator' && (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          {/* 날짜 필터 + 갱신 */}
           <div style={{ display: 'flex', gap: 6, padding: '6px 8px', borderBottom: '1px solid #1e1e2e', alignItems: 'center', flexShrink: 0 }}>
             <select
               value={indDays}
@@ -295,7 +290,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
                     onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#151525'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? '#1a1a30' : 'transparent'; }}
                   >
-                    {/* 1행: 종목명 + 현재가 + 별표 */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
                       <div
                         title={it.signal}
@@ -326,7 +320,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
                         {watchIds[it.stock_code] ? '★' : '☆'}
                       </button>
                     </div>
-                    {/* 2행: 태그들 */}
                     <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                       {it.tags.map((tag, ti) => (
                         <span key={ti} style={{
@@ -460,6 +453,26 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
           )}
         </div>
       )}
+
+      {/* 후원하기 */}
+      <div style={{
+        flexShrink: 0,
+        borderTop: '1px solid #1e1e2e',
+        padding: '6px 10px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}>
+        <span style={{ fontSize: 8, color: '#6b7280', flexShrink: 0, fontWeight: 600 }}>후원하기</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[['은행', '-'], ['계좌', '-'], ['예금주', '-']].map(([label, value]) => (
+            <div key={label} style={{ display: 'flex', gap: 3, alignItems: 'baseline' }}>
+              <span style={{ fontSize: 7, color: '#4b5563' }}>{label}</span>
+              <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600 }}>{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };

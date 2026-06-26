@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { subscribePlan } from '../api/auth';
 
 interface PlanFeature {
   text: string;
@@ -93,6 +94,40 @@ export const PLANS: Plan[] = [
     ],
   },
   {
+    id: 'auto-trade',
+    name: 'Max (자동매매)',
+    price: '월 249,000원',
+    priceDetail: '프로그램 이용료 포함',
+    description: (
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span>
+          <span style={{ color: '#c084fc', fontWeight: 600 }}>ju-model-v2</span>
+          {' + '}
+          <span style={{ color: '#f472b6', fontWeight: 600 }}>seo-model-v1</span>
+        </span>
+        <span style={{ color: '#6b7280' }}>키움 / 한국투자 API 연동</span>
+      </span>
+    ),
+    color: '#fb923c',
+    borderColor: '#7c2d12',
+    badge: 'NEW',
+    badgeColor: '#ea580c',
+    features: [
+      { text: '글로벌 시장 현황', included: true },
+      { text: '차트 (일봉 / 5분봉)', included: true },
+      { text: '네이버 뉴스 검색', included: true },
+      { text: '매매일지', included: true },
+      { text: 'AI 예측 신호 (ju-model-v2)', included: true },
+      { text: 'AI 예측 신호 (seo-model-v1)', included: true },
+      { text: '지표 예측 (today-signals)', included: true },
+      { text: '관심종목', included: true },
+      { text: '골든보 / 침체구간 신호', included: true },
+      { text: '텔레그램 알림', included: true },
+      { text: '키움증권 / 한국투자증권 자동매매', included: true },
+      { text: '신규 모델 즉시 체험', included: true },
+    ],
+  },
+  {
     id: 'telegram',
     name: '텔레그램',
     price: '월 79,900원',
@@ -112,7 +147,26 @@ export const PLANS: Plan[] = [
   },
 ];
 
-export const PlanCard: React.FC<{ plan: Plan; currentPlanId?: string }> = ({ plan, currentPlanId }) => {
+const CheckIcon = ({ color }: { color: string }) => (
+  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
+    <path d="M2 6.5l3 3 5-6" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const CrossIcon = () => (
+  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
+    <circle cx="6" cy="6" r="6" fill="#374151" fillOpacity="0.3" />
+    <path d="M4 4l4 4M8 4l-4 4" stroke="#4b5563" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+interface PlanCardProps {
+  plan: Plan;
+  currentPlanId?: string;
+  onSubscribe?: (planId: string, planName: string, price: string) => void;
+}
+
+export const PlanCard: React.FC<PlanCardProps> = ({ plan, currentPlanId, onSubscribe }) => {
   const isCurrent = currentPlanId === plan.id;
   const hasAnyPlan = !!currentPlanId;
 
@@ -137,54 +191,26 @@ export const PlanCard: React.FC<{ plan: Plan; currentPlanId?: string }> = ({ pla
         display: 'flex',
         flexDirection: 'column',
         gap: 14,
-        flex: '1 1 180px',
-        minWidth: 180,
-        maxWidth: 260,
+        flex: '1 1 160px',
+        minWidth: 160,
+        maxWidth: 220,
         position: 'relative',
       }}
     >
       {plan.badge && (
-        <span
-          style={{
-            position: 'absolute',
-            top: 14,
-            right: 14,
-            background: badgeBackground,
-            color: '#fff',
-            fontSize: 9,
-            fontWeight: 700,
-            padding: '2px 6px',
-            borderRadius: 4,
-            letterSpacing: '0.05em',
-          }}
-        >
+        <span style={{ position: 'absolute', top: 14, right: 14, background: badgeBackground, color: '#fff', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, letterSpacing: '0.05em' }}>
           {plan.badge}
         </span>
       )}
       {isCurrent && (
-        <span
-          style={{
-            position: 'absolute',
-            top: 14,
-            left: 14,
-            background: plan.color + '22',
-            color: plan.color,
-            fontSize: 9,
-            fontWeight: 700,
-            padding: '2px 6px',
-            borderRadius: 4,
-            border: `1px solid ${plan.color}44`,
-          }}
-        >
+        <span style={{ position: 'absolute', top: 14, left: 14, background: plan.color + '22', color: plan.color, fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, border: `1px solid ${plan.color}44` }}>
           현재 플랜
         </span>
       )}
 
       <div style={{ marginTop: isCurrent ? 20 : 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: plan.color, marginBottom: 4 }}>
-          {plan.name}
-        </div>
-        <div style={{ fontSize: 10, color: '#6b7280' }}>{plan.description}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: plan.color, marginBottom: 4 }}>{plan.name}</div>
+        <div style={{ fontSize: 10, color: '#6b7280', minHeight: 32 }}>{plan.description}</div>
       </div>
 
       <div>
@@ -197,18 +223,15 @@ export const PlanCard: React.FC<{ plan: Plan; currentPlanId?: string }> = ({ pla
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {plan.features.map((f, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ fontSize: 10, color: f.included ? plan.color : '#374151', flexShrink: 0, width: 12, textAlign: 'center' }}>
-              {f.included ? 'v' : 'x'}
-            </span>
-            <span style={{ fontSize: 10, color: f.included ? '#d1d5db' : '#374151' }}>
-              {f.text}
-            </span>
+            {f.included ? <CheckIcon color={plan.color} /> : <CrossIcon />}
+            <span style={{ fontSize: 10, color: f.included ? '#d1d5db' : '#374151' }}>{f.text}</span>
           </div>
         ))}
       </div>
 
       <button
         disabled={isCurrent}
+        onClick={() => !isCurrent && onSubscribe?.(plan.id, plan.name, plan.price)}
         style={{
           marginTop: 'auto',
           width: '100%',
@@ -233,57 +256,138 @@ export const PlanCard: React.FC<{ plan: Plan; currentPlanId?: string }> = ({ pla
   );
 };
 
-interface PricingContentProps {
-  currentPlanId?: string;
+// 결제 확인 모달
+interface ConfirmModalProps {
+  planName: string;
+  price: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
 }
 
-export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId }) => (
-  <div>
-    <div style={{ marginBottom: 10 }}>
-      <p style={{ fontSize: 10, color: '#4b5563', margin: 0 }}>
-        * 프로그램 기본 사용료는 모든 유료 플랜에 포함됩니다.
-      </p>
-    </div>
-
-    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
-      {PLANS.map((plan) => (
-        <PlanCard key={plan.id} plan={plan} currentPlanId={currentPlanId} />
-      ))}
-    </div>
-
-    <div style={{ background: '#0a0a14', border: '1px solid #1e1e2e', borderRadius: 6, padding: '14px 16px' }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 12 }}>후원하기</div>
-      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-        {[['은행', '-'], ['계좌번호', '-'], ['예금주', '-']].map(([label, value]) => (
-          <div key={label}>
-            <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 3 }}>{label}</div>
-            <div style={{ fontSize: 12, color: '#d1d5db', fontWeight: 600 }}>{value}</div>
-          </div>
-        ))}
+const ConfirmModal: React.FC<ConfirmModalProps> = ({ planName, price, onConfirm, onCancel, loading }) => (
+  <div
+    onClick={onCancel}
+    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '28px 28px', width: 360, maxWidth: '90vw' }}
+    >
+      <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>플랜 변경 확인</div>
+      <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 20, lineHeight: 1.7 }}>
+        <span style={{ color: '#d1d5db', fontWeight: 600 }}>{planName}</span> 플랜으로 변경합니다.<br />
+        요금: <span style={{ color: '#d1d5db', fontWeight: 600 }}>{price}</span>
       </div>
-      <div style={{ fontSize: 9, color: '#374151', marginTop: 10 }}>
-        * 계좌 정보는 추후 업데이트 예정입니다.
+      <div style={{ background: '#0a0a14', border: '1px solid #1e1e2e', borderRadius: 6, padding: '10px 12px', marginBottom: 20 }}>
+        <div style={{ fontSize: 9, color: '#4b5563', lineHeight: 1.7 }}>
+          본 서비스는 투자 권유가 아니며, 모든 투자 결과는 이용자 본인에게 귀속됩니다. 원금 보장이 되지 않으며, 서비스 제공자는 투자 손실에 대한 법적 책임을 지지 않습니다.
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={onCancel}
+          style={{ flex: 1, padding: '9px 0', background: 'transparent', border: '1px solid #2d2d3d', borderRadius: 6, color: '#6b7280', fontSize: 11, cursor: 'pointer' }}
+        >
+          취소
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={loading}
+          style={{ flex: 1, padding: '9px 0', background: '#6366f1', border: 'none', borderRadius: 6, color: '#fff', fontSize: 11, fontWeight: 700, cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.7 : 1 }}
+        >
+          {loading ? '처리 중...' : '확인'}
+        </button>
       </div>
     </div>
   </div>
 );
+
+interface PricingContentProps {
+  currentPlanId?: string;
+  onPlanChanged?: (newPlanId: string) => void;
+}
+
+export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, onPlanChanged }) => {
+  const [confirm, setConfirm] = useState<{ planId: string; planName: string; price: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const handleSubscribe = (planId: string, planName: string, price: string) => {
+    setSuccessMsg(null);
+    setConfirm({ planId, planName, price });
+  };
+
+  const handleConfirm = async () => {
+    if (!confirm) return;
+    setLoading(true);
+    try {
+      await subscribePlan(confirm.planId);
+      setSuccessMsg(`${confirm.planName} 플랜으로 변경되었습니다.`);
+      onPlanChanged?.(confirm.planId);
+    } catch (e: any) {
+      setSuccessMsg(e?.response?.data?.detail ?? '오류가 발생했습니다. 다시 시도해주세요.');
+    } finally {
+      setLoading(false);
+      setConfirm(null);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: 10 }}>
+        <p style={{ fontSize: 10, color: '#4b5563', margin: 0 }}>
+          * 프로그램 기본 사용료는 모든 유료 플랜에 포함됩니다.
+        </p>
+      </div>
+
+      {successMsg && (
+        <div style={{ background: '#14532d', border: '1px solid #166534', borderRadius: 6, padding: '10px 14px', marginBottom: 14, fontSize: 11, color: '#4ade80' }}>
+          {successMsg}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
+        {PLANS.map((plan) => (
+          <PlanCard key={plan.id} plan={plan} currentPlanId={currentPlanId} onSubscribe={handleSubscribe} />
+        ))}
+      </div>
+
+      <div style={{ background: '#0a0a14', border: '1px solid #1e1e2e', borderRadius: 6, padding: '12px 16px' }}>
+        <div style={{ fontSize: 10, fontWeight: 600, color: '#4b5563', marginBottom: 6 }}>투자 위험 고지</div>
+        <div style={{ fontSize: 9, color: '#374151', lineHeight: 1.8 }}>
+          본 서비스는 투자 참고용 정보 제공 서비스이며, 투자 권유 또는 금융 자문이 아닙니다.
+          AI 예측 신호 및 자동매매 기능은 시장 상황에 따라 손실이 발생할 수 있으며, 원금 보장이 되지 않습니다.
+          모든 투자 결정과 그에 따른 손익은 전적으로 이용자 본인에게 귀속되며, 본 서비스 제공자는 투자 결과에 대한 법적 책임을 지지 않습니다.
+          자동매매 기능 이용 시 증권사 API 연동 과정에서 발생하는 오류, 네트워크 장애, 시스템 점검 등으로 인한 손실에 대해서도 책임지지 않습니다.
+        </div>
+      </div>
+
+      {confirm && (
+        <ConfirmModal
+          planName={confirm.planName}
+          price={confirm.price}
+          onConfirm={handleConfirm}
+          onCancel={() => setConfirm(null)}
+          loading={loading}
+        />
+      )}
+    </div>
+  );
+};
 
 const PricingPage: React.FC = () => {
   const navigate = useNavigate();
 
   return (
     <div style={{ background: '#0a0a14', minHeight: '100vh', padding: '40px 24px', fontFamily: 'inherit', boxSizing: 'border-box' }}>
-      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
-          <button
-            onClick={() => navigate('/')}
-            style={{ background: 'none', border: '1px solid #1e1e2e', color: '#6b7280', borderRadius: 4, padding: '4px 10px', fontSize: 11, cursor: 'pointer' }}
-          >
+          <button onClick={() => navigate('/')}
+            style={{ background: 'none', border: '1px solid #1e1e2e', color: '#6b7280', borderRadius: 4, padding: '4px 10px', fontSize: 11, cursor: 'pointer' }}>
             &lt; 돌아가기
           </button>
-          <h1 style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', margin: 0 }}>
-            RichClub AI - 요금제
-          </h1>
+          <h1 style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', margin: 0 }}>RichClub AI - 요금제</h1>
         </div>
         <PricingContent />
       </div>
