@@ -1,0 +1,62 @@
+// signal 분석 근거 Text
+  const getFeatureText = (
+    feature: Feature,
+    value: number,
+    direction: string,
+  ) => {
+    switch (feature) {
+      case "MACD":
+        return direction === "positive"
+          ? "MACD 상승 추세 확인"
+          : "MACD 하락 추세 확인";
+
+      case "종가/60일선 비율":
+        if (value >= 1.2) {
+          return "장기 추세 강세 유지";
+        }
+
+        if (value >= 1) {
+          return "장기 추세 우상향";
+        }
+
+        return "장기 추세 약세";
+
+      case "20/60일선 비율":
+        return value >= 1 ? "중장기 정배열 형성" : "중장기 역배열 형성";
+
+      case "5/20일선 비율":
+        return value >= 1 ? "단기 상승 흐름 우세" : "단기 하락 흐름 우세";
+
+      case "RSI":
+        if (value >= 70) {
+          return "RSI 과매수 구간";
+        }
+
+        if (value <= 30) {
+          return "RSI 과매도 구간";
+        }
+
+        return "RSI 중립 구간";
+
+      case "스토캐스틱 K":
+      case "스토캐스틱 D":
+        if (value >= 80) {
+          return "단기 과매수 신호";
+        }
+
+        if (value <= 20) {
+          return "단기 과매도 신호";
+        }
+
+        return "단기 모멘텀 유지";
+    }
+  };
+
+  // 최종 2개의 근거 추출
+  const reasonText = [...featureImportance]
+    .sort((a, b) => featureWeights[b.feature] - featureWeights[a.feature])
+    .slice(0, 2)
+    .map(item =>
+      getFeatureText(item.feature, Number(item.value), item.direction),
+    )
+    .join(" · ");

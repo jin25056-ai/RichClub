@@ -4,16 +4,21 @@ import AuthPage from '../pages/AuthPage';
 import ExamplePage from '../pages/ExamplePage';
 import MLOpsDashboard from '../pages/MLOpsDashboard';
 import TradePage from '../pages/TradePage';
+import PricingPage from '../pages/PricingPage';
+import { ModelProvider } from '../contexts/ModelContext';
 
 const AppRouter: React.FC = () => {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<ExamplePage />} />
-        <Route path="/auth" element={<AuthPage />} />
-        <Route path="/mlops" element={<MLOpsDashboard />} />
-        <Route path="/trade" element={<TradePage />} />
-      </Routes>
+      <ModelProvider>
+        <Routes>
+          <Route path="/" element={<ExamplePage />} />
+          <Route path="/auth" element={<AuthPage />} />
+          <Route path="/mlops" element={<MLOpsDashboard />} />
+          <Route path="/trade" element={<TradePage />} />
+          <Route path="/pricing" element={<PricingPage />} />
+        </Routes>
+      </ModelProvider>
     </BrowserRouter>
   );
 };

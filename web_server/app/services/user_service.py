@@ -32,6 +32,7 @@ async def create_user(db: AsyncIOMotorDatabase, data: UserCreate) -> dict:
         "hashed_password": hash_password(data.password),
         "name": data.name,
         "is_active": True,
+        "plan": "basic-plan",
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
@@ -60,4 +61,5 @@ def serialize_user(doc: dict) -> dict:
         "email": doc["email"],
         "name": doc["name"],
         "created_at": doc["created_at"],
+        "plan": doc.get("plan", "basic-plan"),
     }

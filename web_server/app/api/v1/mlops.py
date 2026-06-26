@@ -265,6 +265,40 @@ async def trigger_predict(
     return {'status': 'started', 'target_date': run_date}
 
 
+@router.post("/predict/seo/full")
+async def trigger_seo_full_predict(
+    background_tasks: BackgroundTasks,
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """seo-model-v1: engineered CSV 전체 기간 예측 (학습 안 한 기간 포함)"""
+    from app.ml.seo_predictor import run_full_prediction
+
+    async def run():
+        await run_full_prediction(db)
+
+    background_tasks.add_task(run)
+    return {'status': 'started', 'model': 'seo-model-v1', 'mode': 'full'}
+
+
+@router.post("/predict/seo/daily")
+async def trigger_seo_daily_predict(
+    background_tasks: BackgroundTasks,
+    target_date: Optional[str] = None,
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """seo-model-v1: 특정 날짜(기본 오늘) 예측"""
+    from app.ml.seo_predictor import run_daily_seo_prediction
+
+    async def run():
+        await run_daily_seo_prediction(db, target_date=target_date)
+
+    background_tasks.add_task(run)
+    run_date = target_date or datetime.now().strftime('%Y-%m-%d')
+    return {'status': 'started', 'model': 'seo-model-v1', 'target_date': run_date}
+
+
 @router.post("/evaluate/run")
 async def trigger_evaluate(
     background_tasks: BackgroundTasks,

@@ -19,6 +19,7 @@ class UserOut(BaseModel):
     email: str
     name: str
     created_at: datetime
+    plan: str = "basic-plan"
 
 
 class TokenResponse(BaseModel):

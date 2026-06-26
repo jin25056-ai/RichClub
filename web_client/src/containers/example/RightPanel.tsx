@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { stockApi, watchlistApi, AIPredictionItem, WatchlistItem } from '../../api/stock';
 
-type RightTab = 'ai' | 'watchlist' | 'indicator';
+type RightTab = 'ai' | 'watchlist' | 'indicator' | 'news';
 
 const SIGNAL_COLOR: Record<string, string> = { 매수: '#16a34a', 매도: '#dc2626', 관망: '#d97706', '매수 우세': '#4ade80', '매도 우세': '#f87171', 중립: '#6b7280' };
 const SIGNAL_BG: Record<string, string>    = { 매수: '#14532d', 매도: '#7f1d1d', 관망: '#78350f', '매수 우세': '#14532d', '매도 우세': '#7f1d1d', 중립: '#1e1e2e' };
@@ -11,6 +11,7 @@ interface Props {
   onSelectStock: (stockCode: string, stockName: string) => void;
   selectedCode?: string;
   onWatchChange?: (code: string, id: string | null) => void;
+  modelId?: string;
 }
 
 const fmtPrice = (p: number) =>
@@ -34,10 +35,9 @@ const UpdateNotice: React.FC = () => (
   </div>
 );
 
-const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChange }) => {
+const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChange, modelId = 'ju-model-v2' }) => {
   const [tab, setTab] = useState<RightTab>('ai');
 
-  // 지표 예측 (today-signals) 상태
   type TodaySignalItem = {
     stock_code: string; stock_name: string;
     signal: string; sub: string;
@@ -50,19 +50,17 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
   const [indLoading, setIndLoading] = useState(false);
   const [expandedCodes] = useState<Set<string>>(new Set());
 
-  // AI 예측 상태
   const [items, setItems] = useState<AIPredictionItem[]>([]);
   const [filter, setFilter] = useState<'' | '매수' | '매도' | '관망'>('');
   const [loading, setLoading] = useState(false);
 
-  // 관심종목 상태
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
-  const [watchIds, setWatchIds] = useState<Record<string, string>>({}); // code -> id
+  const [watchIds, setWatchIds] = useState<Record<string, string>>({});
   const [wLoading, setWLoading] = useState(false);
 
   const fetchPredictions = (signal: '' | '매수' | '매도' | '관망') => {
     setLoading(true);
-    stockApi.getPredictions(signal || undefined, 100)
+    stockApi.getPredictions(signal || undefined, 100, modelId)
       .then((res) => setItems(res.data))
       .finally(() => setLoading(false));
   };
@@ -81,9 +79,23 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
 
   const fetchIndicators = useCallback((days: number) => {
     setIndLoading(true);
-    stockApi.getTodaySignals(days)
+    stockApi.getTodaySignals(days, modelId)
       .then((res) => setIndItems(res.data))
       .finally(() => setIndLoading(false));
+  }, [modelId]);
+
+  type NewsItem = { title: string; originallink: string; link: string; description: string; pubDate: string; };
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsQuery, setNewsQuery] = useState('주식 증권');
+
+  const fetchNews = useCallback((q?: string) => {
+    const query = q ?? '주식 증권';
+    setNewsQuery(query);
+    setNewsLoading(true);
+    stockApi.getNews(query)
+      .then((res) => setNewsItems(res.data.items ?? []))
+      .finally(() => setNewsLoading(false));
   }, []);
 
   useEffect(() => { fetchPredictions(''); }, []);
@@ -122,10 +134,11 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 탭 */}
       <div style={{ display: 'flex', borderBottom: '1px solid #1e1e2e', flexShrink: 0 }}>
-        {(['ai', 'indicator', 'watchlist'] as RightTab[]).map((t) => (
+        {(['ai', 'indicator', 'watchlist', 'news'] as RightTab[]).map((t) => (
           <button key={t} onClick={() => {
             setTab(t);
             if (t === 'indicator' && indItems.length === 0) fetchIndicators(indDays);
+            if (t === 'news' && newsItems.length === 0) fetchNews();
           }}
             style={{
               flex: 1, padding: '7px 0', fontSize: 10, border: 'none', cursor: 'pointer',
@@ -134,7 +147,7 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
               fontWeight: tab === t ? 600 : 400,
               borderBottom: tab === t ? '2px solid #6366f1' : '2px solid transparent',
             }}>
-            {t === 'ai' ? 'AI 예측' : t === 'indicator' ? '지표 예측' : '관심종목'}
+            {t === 'ai' ? 'AI' : t === 'indicator' ? '지표' : t === 'watchlist' ? '관심' : '뉴스'}
           </button>
         ))}
       </div>
@@ -202,7 +215,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
                           </div>
                         )}
                       </div>
-                      {/* 별표 버튼 */}
                       <button
                         onClick={(e) => toggleWatch(e, item)}
                         title={isWatching ? '관심종목 제거' : '관심종목 추가'}
@@ -225,7 +237,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
       {/* 지표 예측 탭 */}
       {tab === 'indicator' && (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          {/* 날짜 필터 + 갱신 */}
           <div style={{ display: 'flex', gap: 6, padding: '6px 8px', borderBottom: '1px solid #1e1e2e', alignItems: 'center', flexShrink: 0 }}>
             <select
               value={indDays}
@@ -280,7 +291,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
                     onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#151525'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? '#1a1a30' : 'transparent'; }}
                   >
-                    {/* 1행: 종목명 + 현재가 + 별표 */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
                       <div
                         title={it.signal}
@@ -311,7 +321,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
                         {watchIds[it.stock_code] ? '★' : '☆'}
                       </button>
                     </div>
-                    {/* 2행: 태그들 */}
                     <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                       {it.tags.map((tag, ti) => (
                         <span key={ti} style={{
@@ -327,6 +336,58 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 뉴스 탭 */}
+      {tab === 'news' && (
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', gap: 4, padding: '6px 8px', borderBottom: '1px solid #1e1e2e', alignItems: 'center', flexShrink: 0 }}>
+            <input
+              type="text"
+              value={newsQuery}
+              onChange={(e) => setNewsQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') fetchNews(newsQuery); }}
+              style={{
+                flex: 1, padding: '3px 7px', fontSize: 10, minWidth: 0,
+                background: '#1a1a2e', border: '1px solid #2d2d3d', borderRadius: 5,
+                color: newsQuery === '주식 증권' ? '#4b5563' : '#e2e8f0', outline: 'none',
+              }}
+            />
+            <button onClick={() => fetchNews(newsQuery)}
+              style={{ fontSize: 9, padding: '3px 7px', borderRadius: 4, border: '1px solid #2d2d3d', background: 'transparent', color: '#9ca3af', cursor: 'pointer', flexShrink: 0 }}>
+              검색
+            </button>
+            <button onClick={() => { setNewsQuery('주식 증권'); fetchNews('주식 증권'); }}
+              style={{ fontSize: 11, padding: '2px 5px', borderRadius: 4, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer', flexShrink: 0 }}
+              title="새로고침">
+              ↻
+            </button>
+          </div>
+          {newsLoading ? (
+            <div style={{ padding: 20, fontSize: 11, color: '#666', textAlign: 'center' }}>불러오는 중...</div>
+          ) : (
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {newsItems.map((item, i) => (
+                <a key={i} href={item.originallink || item.link} target="_blank" rel="noreferrer"
+                  style={{ display: 'block', padding: '8px 10px', borderBottom: '1px solid #13131e', textDecoration: 'none' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#151525')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+                  <div style={{
+                    fontSize: 11, color: '#d1d5db', fontWeight: 500,
+                    marginBottom: 3, lineHeight: 1.4,
+                    display: '-webkit-box', WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                  }}
+                    dangerouslySetInnerHTML={{ __html: item.title }}
+                  />
+                  <div style={{ fontSize: 9, color: '#4b5563' }}>
+                    {new Date(item.pubDate).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </a>
+              ))}
             </div>
           )}
         </div>
@@ -393,6 +454,26 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
           )}
         </div>
       )}
+
+      {/* 후원하기 */}
+      <div style={{
+        flexShrink: 0,
+        borderTop: '1px solid #1e1e2e',
+        padding: '6px 10px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}>
+        <span style={{ fontSize: 8, color: '#6b7280', flexShrink: 0, fontWeight: 600 }}>후원하기</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[['은행', '-'], ['계좌', '-'], ['예금주', '-']].map(([label, value]) => (
+            <div key={label} style={{ display: 'flex', gap: 3, alignItems: 'baseline' }}>
+              <span style={{ fontSize: 7, color: '#4b5563' }}>{label}</span>
+              <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600 }}>{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };

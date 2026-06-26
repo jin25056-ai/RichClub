@@ -386,9 +386,10 @@ interface Props {
   sellMode?: 'ai' | 'simple';
   chartInterval?: ChartInterval;
   onPriceUpdate?: (price: number) => void;
+  modelId?: string;
 }
 
-const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, searchOnly, chartOnly, period: externalPeriod, sellMode = 'ai', chartInterval: externalInterval, onPriceUpdate }) => {
+const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, searchOnly, chartOnly, period: externalPeriod, sellMode = 'ai', chartInterval: externalInterval, onPriceUpdate, modelId = 'ju-model-v2' }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StockItem[]>([]);
   const [selected, setSelected] = useState<StockItem | null>(null);
@@ -674,7 +675,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
       stockApi.getCandles(code, 0),
       stockApi.getRSI(code, 'all'),
       stockApi.getMACD(code, 'all'),
-      stockApi.getPredictions(undefined, 500, name),
+      stockApi.getPredictions(undefined, 500, modelId, name),
     ])
       .then(([candleRes, rsiRes, macdRes, predRes]) => {
         const map: Record<string, any> = {};

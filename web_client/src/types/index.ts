@@ -3,6 +3,7 @@ export interface User {
   email: string;
   name: string;
   created_at: string;
+  plan: string;
 }
 
 export interface AuthFormValues {
