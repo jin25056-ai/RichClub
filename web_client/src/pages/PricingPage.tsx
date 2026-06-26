@@ -10,7 +10,7 @@ interface PlanFeature {
 interface Plan {
   id: string;
   name: string;
-  price: string;
+  monthlyPrice: number; // 월 정가 (원)
   priceDetail: string;
   description: React.ReactNode;
   color: string;
@@ -23,8 +23,8 @@ interface Plan {
 export const PLANS: Plan[] = [
   {
     id: 'basic-plan',
-    name: '기본',
-    price: '월 19,900원',
+    name: 'Demo',
+    monthlyPrice: 19900,
     priceDetail: '프로그램 이용료',
     description: '기본 기능 이용',
     color: '#6b7280',
@@ -34,17 +34,17 @@ export const PLANS: Plan[] = [
       { text: '차트 (일봉 / 5분봉)', included: true },
       { text: '네이버 뉴스 검색', included: true },
       { text: '매매일지', included: true },
+      { text: '관심종목', included: true },
+      { text: '골든보 / 침체구간 신호', included: true },
       { text: 'AI 예측 신호', included: false },
       { text: '지표 예측 (today-signals)', included: false },
-      { text: '관심종목', included: false },
-      { text: '골든보 / 침체구간 신호', included: false },
       { text: '텔레그램 알림', included: false },
     ],
   },
   {
     id: 'ju-model',
     name: 'Basic',
-    price: '월 49,900원',
+    monthlyPrice: 49900,
     priceDetail: '프로그램 이용료 포함',
     description: (
       <span>
@@ -68,7 +68,7 @@ export const PLANS: Plan[] = [
   {
     id: 'seo-model',
     name: 'Pro',
-    price: '월 149,900원',
+    monthlyPrice: 149900,
     priceDetail: '프로그램 이용료 포함',
     description: (
       <span>
@@ -96,7 +96,7 @@ export const PLANS: Plan[] = [
   {
     id: 'auto-trade',
     name: 'Max (자동매매)',
-    price: '월 249,000원',
+    monthlyPrice: 249000,
     priceDetail: '프로그램 이용료 포함',
     description: (
       <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -130,7 +130,7 @@ export const PLANS: Plan[] = [
   {
     id: 'telegram',
     name: '텔레그램',
-    price: '월 79,900원',
+    monthlyPrice: 79900,
     priceDetail: '채널 단독 구독',
     description: '채널 단독 구독',
     color: '#38bdf8',
@@ -140,12 +140,16 @@ export const PLANS: Plan[] = [
     features: [
       { text: '텔레그램 알림 채널 구독', included: true },
       { text: 'AI 매수/매도 신호 알림', included: true },
-      { text: '프로그램 접근', included: false },
+      { text: '프로그램 접근', included: true },
       { text: '차트 / 지표 분석', included: false },
       { text: '매매일지', included: false },
     ],
   },
 ];
+
+const ANNUAL_DISCOUNT = 0.2; // 20% 할인
+
+const fmtPrice = (n: number) => n.toLocaleString('ko-KR');
 
 const CheckIcon = ({ color }: { color: string }) => (
   <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
@@ -163,12 +167,22 @@ const CrossIcon = () => (
 interface PlanCardProps {
   plan: Plan;
   currentPlanId?: string;
+  isAnnual: boolean;
   onSubscribe?: (planId: string, planName: string, price: string) => void;
 }
 
-export const PlanCard: React.FC<PlanCardProps> = ({ plan, currentPlanId, onSubscribe }) => {
+export const PlanCard: React.FC<PlanCardProps> = ({ plan, currentPlanId, isAnnual, onSubscribe }) => {
   const isCurrent = currentPlanId === plan.id;
   const hasAnyPlan = !!currentPlanId;
+
+  const displayMonthly = isAnnual
+    ? Math.floor(plan.monthlyPrice * (1 - ANNUAL_DISCOUNT))
+    : plan.monthlyPrice;
+  const annualTotal = Math.floor(plan.monthlyPrice * (1 - ANNUAL_DISCOUNT)) * 12;
+  const originalAnnual = plan.monthlyPrice * 12;
+  const savedAmount = originalAnnual - annualTotal;
+
+  const priceStr = `월 ${fmtPrice(displayMonthly)}원`;
 
   const buttonLabel = (() => {
     if (isCurrent) return '현재 이용 중';
@@ -203,14 +217,24 @@ export const PlanCard: React.FC<PlanCardProps> = ({ plan, currentPlanId, onSubsc
         </span>
       )}
 
-      <div style={{ marginTop: 0 }}>
+      <div>
         <div style={{ fontSize: 13, fontWeight: 700, color: plan.color, marginBottom: 4 }}>{plan.name}</div>
         <div style={{ fontSize: 10, color: '#6b7280', minHeight: 32 }}>{plan.description}</div>
       </div>
 
       <div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}>{plan.price}</div>
-        {plan.priceDetail && (
+        {isAnnual && (
+          <div style={{ fontSize: 9, color: '#4b5563', textDecoration: 'line-through', marginBottom: 2 }}>
+            월 {fmtPrice(plan.monthlyPrice)}원
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}>{priceStr}</div>
+          {isAnnual && (
+            <span style={{ fontSize: 9, color: '#4ade80', fontWeight: 700 }}>-20%</span>
+          )}
+        </div>
+        {!isAnnual && (
           <div style={{ fontSize: 9, color: '#4b5563', marginTop: 3 }}>{plan.priceDetail}</div>
         )}
       </div>
@@ -226,7 +250,7 @@ export const PlanCard: React.FC<PlanCardProps> = ({ plan, currentPlanId, onSubsc
 
       <button
         disabled={isCurrent}
-        onClick={() => !isCurrent && onSubscribe?.(plan.id, plan.name, plan.price)}
+        onClick={() => !isCurrent && onSubscribe?.(plan.id, plan.name, priceStr)}
         style={{
           marginTop: 'auto',
           width: '100%',
@@ -255,12 +279,13 @@ export const PlanCard: React.FC<PlanCardProps> = ({ plan, currentPlanId, onSubsc
 interface ConfirmModalProps {
   planName: string;
   price: string;
+  isAnnual: boolean;
   onConfirm: () => void;
   onCancel: () => void;
   loading: boolean;
 }
 
-const ConfirmModal: React.FC<ConfirmModalProps> = ({ planName, price, onConfirm, onCancel, loading }) => (
+const ConfirmModal: React.FC<ConfirmModalProps> = ({ planName, price, isAnnual, onConfirm, onCancel, loading }) => (
   <div
     onClick={onCancel}
     style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -273,6 +298,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({ planName, price, onConfirm,
       <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 20, lineHeight: 1.7 }}>
         <span style={{ color: '#d1d5db', fontWeight: 600 }}>{planName}</span> 플랜으로 변경합니다.<br />
         요금: <span style={{ color: '#d1d5db', fontWeight: 600 }}>{price}</span>
+        {isAnnual && <span style={{ color: '#4ade80', marginLeft: 4, fontSize: 10 }}>(연간 결제 · 20% 할인)</span>}
       </div>
       <div style={{ background: '#0a0a14', border: '1px solid #1e1e2e', borderRadius: 6, padding: '10px 12px', marginBottom: 20 }}>
         <div style={{ fontSize: 9, color: '#4b5563', lineHeight: 1.7 }}>
@@ -280,17 +306,11 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({ planName, price, onConfirm,
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          onClick={onCancel}
-          style={{ flex: 1, padding: '9px 0', background: 'transparent', border: '1px solid #2d2d3d', borderRadius: 6, color: '#6b7280', fontSize: 11, cursor: 'pointer' }}
-        >
+        <button onClick={onCancel} style={{ flex: 1, padding: '9px 0', background: 'transparent', border: '1px solid #2d2d3d', borderRadius: 6, color: '#6b7280', fontSize: 11, cursor: 'pointer' }}>
           취소
         </button>
-        <button
-          onClick={onConfirm}
-          disabled={loading}
-          style={{ flex: 1, padding: '9px 0', background: '#6366f1', border: 'none', borderRadius: 6, color: '#fff', fontSize: 11, fontWeight: 700, cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.7 : 1 }}
-        >
+        <button onClick={onConfirm} disabled={loading}
+          style={{ flex: 1, padding: '9px 0', background: '#6366f1', border: 'none', borderRadius: 6, color: '#fff', fontSize: 11, fontWeight: 700, cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.7 : 1 }}>
           {loading ? '처리 중...' : '확인'}
         </button>
       </div>
@@ -304,6 +324,7 @@ interface PricingContentProps {
 }
 
 export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, onPlanChanged }) => {
+  const [isAnnual, setIsAnnual] = useState(false);
   const [confirm, setConfirm] = useState<{ planId: string; planName: string; price: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -330,7 +351,39 @@ export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, o
 
   return (
     <div>
-      <div style={{ marginBottom: 10 }}>
+      {/* 월간 / 연간 토글 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <div style={{ display: 'inline-flex', background: '#0d0d1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: 3 }}>
+          <button
+            onClick={() => setIsAnnual(false)}
+            style={{
+              padding: '6px 18px', fontSize: 11, fontWeight: isAnnual ? 400 : 700,
+              borderRadius: 6, border: 'none', cursor: 'pointer',
+              background: !isAnnual ? '#1e1e35' : 'transparent',
+              color: !isAnnual ? '#a5b4fc' : '#4b5563',
+              boxShadow: !isAnnual ? '0 0 0 1px #3730a344' : 'none',
+            }}
+          >
+            월간
+          </button>
+          <button
+            onClick={() => setIsAnnual(true)}
+            style={{
+              padding: '6px 18px', fontSize: 11, fontWeight: isAnnual ? 700 : 400,
+              borderRadius: 6, border: 'none', cursor: 'pointer',
+              background: isAnnual ? '#1e1e35' : 'transparent',
+              color: isAnnual ? '#a5b4fc' : '#4b5563',
+              boxShadow: isAnnual ? '0 0 0 1px #3730a344' : 'none',
+            }}
+          >
+            연간
+          </button>
+        </div>
+        {isAnnual && (
+          <span style={{ fontSize: 10, color: '#4ade80', fontWeight: 700, background: '#14532d', border: '1px solid #166534', padding: '3px 8px', borderRadius: 4 }}>
+            20% 절약
+          </span>
+        )}
         <p style={{ fontSize: 10, color: '#4b5563', margin: 0 }}>
           * 프로그램 기본 사용료는 모든 유료 플랜에 포함됩니다.
         </p>
@@ -344,7 +397,7 @@ export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, o
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
         {PLANS.map((plan) => (
-          <PlanCard key={plan.id} plan={plan} currentPlanId={currentPlanId} onSubscribe={handleSubscribe} />
+          <PlanCard key={plan.id} plan={plan} currentPlanId={currentPlanId} isAnnual={isAnnual} onSubscribe={handleSubscribe} />
         ))}
       </div>
 
@@ -362,6 +415,7 @@ export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, o
         <ConfirmModal
           planName={confirm.planName}
           price={confirm.price}
+          isAnnual={isAnnual}
           onConfirm={handleConfirm}
           onCancel={() => setConfirm(null)}
           loading={loading}
