@@ -32,6 +32,7 @@ async def run_daily_seo_predict() -> None:
     from app.ml.seo_predictor import run_daily_seo_prediction
     await run_daily_seo_prediction(db)
 
+
 async def run_evaluate() -> None:
     """매일 수익률 계산 + 월별 집계 (UTC 07:00)"""
     db = get_db()
@@ -48,10 +49,6 @@ async def run_retrain() -> None:
 
 
 async def run_auto_retrain_if_needed() -> None:
-    """
-    예측 정확도가 50% 미만이면 자동 재학습 트리거
-    매주 수요일 점검
-    """
     db = get_db()
     from datetime import datetime, timezone, timedelta
     since = datetime.now(timezone.utc) - timedelta(days=7)
@@ -83,27 +80,25 @@ def start_scheduler() -> None:
     scheduler.add_job(collect_market_data, trigger="cron",
                       hour="0,6", minute="0", id="collect_market_data", replace_existing=True)
 
-    # 5분봉 수집 (월~금 항상, upsert)
-    # misfire_grace_time=240: 서버 재시작으로 놓쳐도 4분 이내면 재실행
+    # 5분봉 수집 (월~금)
     scheduler.add_job(run_5min_candle_collection, trigger="cron",
                       day_of_week="mon-fri", minute="*/5",
                       id="collect_5min_candles", replace_existing=True,
                       misfire_grace_time=240)
 
-    # 일별 예측 (KST 15:35 = UTC 06:35) - 장 마감 5분 후
-    # misfire_grace_time=3600: 서버 재시작 등으로 놓친 경우 1시간 이내면 재실행
+    # ju-model 일별 예측 (KST 15:35 = UTC 06:35)
     scheduler.add_job(run_daily_predict, trigger="cron",
                       day_of_week="mon-fri", hour="6", minute="35",
                       id="daily_predict", replace_existing=True,
+                      misfire_grace_time=3600)
 
-    # seo-model-v1 일별 예측 (KST 15:40 = UTC 06:40) - ju-model 5분 후
+    # seo-model-v1 일별 예측 (KST 15:40 = UTC 06:40)
     scheduler.add_job(run_daily_seo_predict, trigger="cron",
                       day_of_week="mon-fri", hour="6", minute="40",
                       id="daily_seo_predict", replace_existing=True,
                       misfire_grace_time=3600)
-                      misfire_grace_time=3600)
 
-    # 예측 성능 평가 (UTC 07:00) - 예측 완료 후 25분 뒤
+    # 예측 성능 평가 (UTC 07:00)
     scheduler.add_job(run_evaluate, trigger="cron",
                       hour="7", minute="0",
                       id="evaluate_predictions", replace_existing=True)
