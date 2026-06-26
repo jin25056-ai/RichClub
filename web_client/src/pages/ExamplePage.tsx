@@ -19,11 +19,11 @@ type ChartInterval = '1d' | '5m';
 const isMobile = () => window.innerWidth <= 768;
 
 const PLAN_LABEL: Record<string, { label: string; color: string }> = {
-  'basic-plan':  { label: '기본', color: '#6b7280' },
-  'ju-model':    { label: 'Basic', color: '#4ade80' },
-  'seo-model':   { label: 'Pro', color: '#a5b4fc' },
-  'auto-trade':  { label: '자동매매', color: '#fb923c' },
-  'telegram':    { label: '텔레그램', color: '#38bdf8' },
+  'basic-plan':  { label: 'Demo',     color: '#6b7280' },
+  'ju-model':    { label: 'Basic',    color: '#4ade80' },
+  'seo-model':   { label: 'Pro',      color: '#a5b4fc' },
+  'auto-trade':  { label: 'Max',      color: '#fb923c' },
+  'telegram':    { label: 'Telegram', color: '#38bdf8' },
 };
 
 interface ProfileDropdownProps {
@@ -55,10 +55,11 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({ user, onLogout, onPri
     <div ref={ref} style={{ position: 'relative' }}>
       <button
         onClick={() => setOpen((v) => !v)}
-        style={{ fontSize: 10, padding: '3px 8px', background: open ? '#1e1e2e' : 'transparent', color: '#6b7280', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+        style={{ fontSize: 10, padding: '3px 8px', background: open ? '#1e1e2e' : 'transparent', color: '#9ca3af', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
       >
         <span style={{ fontSize: 9, color: '#4b5563' }}>&#9679;</span>
         {user.name}
+        <span style={{ fontSize: 9, color: planInfo.color, fontWeight: 600, background: planInfo.color + '18', border: `1px solid ${planInfo.color}33`, borderRadius: 3, padding: '1px 5px' }}>{planInfo.label}</span>
       </button>
 
       {open && (
@@ -75,7 +76,7 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({ user, onLogout, onPri
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <button onClick={() => { setOpen(false); onPricingOpen(); }}
               style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 11, padding: '5px 0', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 9, color: '#374151' }}>&#9632;</span>요금제 안내
+              <span style={{ fontSize: 9, color: '#374151' }}>&#9632;</span>요금제 변경
             </button>
             <button onClick={() => { setOpen(false); onLogout(); }}
               style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 11, padding: '5px 0', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
