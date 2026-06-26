@@ -202,13 +202,8 @@ export const PlanCard: React.FC<PlanCardProps> = ({ plan, currentPlanId, onSubsc
           {plan.badge}
         </span>
       )}
-      {isCurrent && (
-        <span style={{ position: 'absolute', top: 14, left: 14, background: plan.color + '22', color: plan.color, fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, border: `1px solid ${plan.color}44` }}>
-          현재 플랜
-        </span>
-      )}
 
-      <div style={{ marginTop: isCurrent ? 20 : 0 }}>
+      <div style={{ marginTop: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: plan.color, marginBottom: 4 }}>{plan.name}</div>
         <div style={{ fontSize: 10, color: '#6b7280', minHeight: 32 }}>{plan.description}</div>
       </div>
