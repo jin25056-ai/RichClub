@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import GlobalMarketSection from '../containers/example/GlobalMarketSection';
 import RightPanel from '../containers/example/RightPanel';
@@ -6,6 +6,9 @@ import TradeModal from '../containers/example/TradeModal';
 import StockSearchSection from '../containers/example/StockSearchSection';
 import WinRateSection from '../containers/example/WinRateSection';
 import { stockApi, watchlistApi } from '../api/stock';
+import { getMe, logout } from '../api/auth';
+import { User } from '../types';
+import { PricingContent } from './PricingPage';
 import '../styles/example.css';
 
 type Period = '1m' | '3m' | '6m';
@@ -13,6 +16,137 @@ type Tab = 'chart' | 'ai' | 'market' | 'winrate';
 type ChartInterval = '1d' | '5m';
 
 const isMobile = () => window.innerWidth <= 768;
+
+const PLAN_LABEL: Record<string, { label: string; color: string }> = {
+  'basic-plan': { label: '기본', color: '#6b7280' },
+  'ju-model':   { label: 'Basic', color: '#4ade80' },
+  'seo-model':  { label: 'Pro', color: '#a5b4fc' },
+  'telegram':   { label: '텔레그램', color: '#38bdf8' },
+};
+
+// 프로필 드롭다운 컴포넌트
+interface ProfileDropdownProps {
+  user: User;
+  onLogout: () => void;
+  onPricingOpen: () => void;
+}
+
+const ProfileDropdown: React.FC<ProfileDropdownProps> = ({ user, onLogout, onPricingOpen }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          fontSize: 10,
+          padding: '3px 8px',
+          background: open ? '#1e1e2e' : 'transparent',
+          color: '#6b7280',
+          border: '1px solid #2d2d3d',
+          borderRadius: 4,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+        }}
+      >
+        <span style={{ fontSize: 9, color: '#4b5563' }}>&#9679;</span>
+        {user.name}
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            right: 0,
+            background: '#0f0f1a',
+            border: '1px solid #1e1e2e',
+            borderRadius: 6,
+            padding: '12px 14px',
+            minWidth: 200,
+            zIndex: 1000,
+            boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+          }}
+        >
+          {/* 계정 정보 */}
+          <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #1e1e2e' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0', marginBottom: 4 }}>
+              {user.name}
+            </div>
+            <div style={{ fontSize: 10, color: '#4b5563' }}>{user.email}</div>
+            <div style={{ fontSize: 9, color: '#374151', marginTop: 4 }}>
+              가입일 {formatDate(user.created_at)}
+            </div>
+            <div style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 5, background: '#0a0a14', border: `1px solid ${(PLAN_LABEL[user.plan] ?? PLAN_LABEL['basic-plan']).color}22`, borderRadius: 4, padding: '3px 7px' }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: (PLAN_LABEL[user.plan] ?? PLAN_LABEL['basic-plan']).color, flexShrink: 0, display: 'inline-block' }} />
+              <span style={{ fontSize: 10, color: (PLAN_LABEL[user.plan] ?? PLAN_LABEL['basic-plan']).color, fontWeight: 600 }}>
+                {(PLAN_LABEL[user.plan] ?? PLAN_LABEL['basic-plan']).label} 플랜
+              </span>
+            </div>
+          </div>
+
+          {/* 메뉴 */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <button
+              onClick={() => { setOpen(false); onPricingOpen(); }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#6b7280',
+                fontSize: 11,
+                padding: '5px 0',
+                textAlign: 'left',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <span style={{ fontSize: 9, color: '#374151' }}>&#9632;</span>
+              요금제 안내
+            </button>
+            <button
+              onClick={() => { setOpen(false); onLogout(); }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#6b7280',
+                fontSize: 11,
+                padding: '5px 0',
+                textAlign: 'left',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <span style={{ fontSize: 9, color: '#374151' }}>&#9632;</span>
+              로그아웃
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ExamplePage: React.FC = () => {
   const navigate = useNavigate();
@@ -27,18 +161,21 @@ const ExamplePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('chart');
   const [watchId, setWatchId] = useState<string | null>(null);
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
-  const [currentPrice, setCurrentPrice] = useState<number | undefined>(undefined); // 현재 종목 관심 여부
+  const [pricingModalOpen, setPricingModalOpen] = useState(false);
+  const [currentPrice, setCurrentPrice] = useState<number | undefined>(undefined);
+  const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
     if (!localStorage.getItem('access_token')) {
       navigate('/auth');
       return;
     }
-    // URL 쿼리 파라미터에서 code 읽기
+    // 유저 정보 조회
+    getMe().then(setUser).catch(() => {});
+
     const params = new URLSearchParams(location.search);
     const code = params.get('code');
     if (code) {
-      // DB에서 종목명 조회
       stockApi.search(code).then((res) => {
         const found = res.data.find((s: any) => s.stock_code === code);
         if (found) {
@@ -64,7 +201,6 @@ const ExamplePage: React.FC = () => {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // 종목 변경 시 관심종목 여부 확인
   const checkWatch = useCallback((code: string) => {
     watchlistApi.check(code)
       .then((res) => setWatchId(res.data.is_watching ? res.data.id : null))
@@ -90,6 +226,11 @@ const ExamplePage: React.FC = () => {
       const res = await watchlistApi.add(selectedStock.code, selectedStock.name);
       setWatchId(res.data.id);
     }
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate('/auth');
   };
 
   const TABS: { key: Tab; label: string }[] = [
@@ -158,15 +299,19 @@ const ExamplePage: React.FC = () => {
           </button>
         </span>
       )}
-      <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
         <button onClick={() => setTradeModalOpen(true)}
           style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#a5b4fc', border: '1px solid #3730a3', borderRadius: 4, cursor: 'pointer' }}>
           매매일지
         </button>
-        <button onClick={() => window.open('/mlops', '_blank')}
+        <button onClick={() => setPricingModalOpen(true)}
+          style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#6b7280', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer' }}>
+          Pricing
+        </button>        <button onClick={() => window.open('/mlops', '_blank')}
           style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#6b7280', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer' }}>
           MLOps
         </button>
+        {user && <ProfileDropdown user={user} onLogout={handleLogout} onPricingOpen={() => setPricingModalOpen(true)} />}
       </div>
     </div>
   );
@@ -239,6 +384,35 @@ const ExamplePage: React.FC = () => {
         initialStockName={selectedStock?.name}
         initialPrice={currentPrice}
       />
+      {pricingModalOpen && (
+        <div
+          onClick={() => setPricingModalOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+            zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10,
+              padding: '24px', maxWidth: 960, width: '95vw', maxHeight: '85vh',
+              overflowY: 'auto', position: 'relative',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>요금제</span>
+              <button
+                onClick={() => setPricingModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}
+              >
+                &#x2715;
+              </button>
+            </div>
+            <PricingContent currentPlanId={user?.plan} />
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
         <div style={{ width: 190, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
           <div style={panel}>
