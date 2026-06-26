@@ -67,3 +67,9 @@ env/
 # os
 .DS_Store
 Thumbs.dbm
+
+# rawdata (수집 데이터 - 용량 큼)
+rawdata/
+
+# temp scripts
+temp*.py

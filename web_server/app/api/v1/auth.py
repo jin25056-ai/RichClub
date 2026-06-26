@@ -7,7 +7,7 @@ from app.core.security import create_access_token, create_refresh_token, decode_
 from app.db.mongo import get_db
 from app.schemas.auth import RefreshRequest, TokenResponse, UserCreate, UserLogin, UserOut
 from app.services.email_service import is_email_verified, send_verification_code, verify_code
-from app.services.user_service import authenticate_user, create_user, find_user_by_id, serialize_user
+from app.services.user_service import authenticate_user, create_user, find_user_by_id, find_user_by_email, serialize_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -33,9 +33,13 @@ class VerifyRequest(BaseModel):
     code: str
 
 
-@router.post("/email/send-code", status_code=200, summary="이메일 인증코드 발송")
+# ────────────────────────────────────────────────
+# 회원가입용 이메일 인증
+# ────────────────────────────────────────────────
+
+@router.post("/email/send-code", status_code=200, summary="회원가입 이메일 인증코드 발송")
 async def send_code(body: EmailRequest, db: AsyncIOMotorDatabase = Depends(db_dep)):
-    """6자리 인증코드를 이메일로 발송 (5분 유효)"""
+    """회원가입 시 이메일 인증코드 발송 (5분 유효)"""
     try:
         await send_verification_code(db, body.email)
     except Exception as e:
@@ -43,13 +47,39 @@ async def send_code(body: EmailRequest, db: AsyncIOMotorDatabase = Depends(db_de
     return {"message": "인증코드가 발송되었습니다."}
 
 
-@router.post("/email/verify-code", status_code=200, summary="이메일 인증코드 검증")
+@router.post("/email/verify-code", status_code=200, summary="회원가입 이메일 인증코드 검증")
 async def verify_email_code(body: VerifyRequest, db: AsyncIOMotorDatabase = Depends(db_dep)):
-    """인증코드 검증"""
+    """회원가입 인증코드 검증"""
     ok = await verify_code(db, body.email, body.code)
     if not ok:
         raise HTTPException(status_code=400, detail="인증코드가 올바르지 않거나 만료되었습니다.")
     return {"message": "이메일 인증이 완료되었습니다."}
+
+
+# ────────────────────────────────────────────────
+# 비밀번호 찾기용 이메일 인증 (별도 엔드포인트)
+# ────────────────────────────────────────────────
+
+@router.post("/password/send-code", status_code=200, summary="비밀번호 찾기 인증코드 발송")
+async def send_password_reset_code(body: EmailRequest, db: AsyncIOMotorDatabase = Depends(db_dep)):
+    """비밀번호 재설정용 인증코드 발송 - 가입된 이메일인지 먼저 확인"""
+    user = await find_user_by_email(db, body.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="가입된 이메일이 아닙니다.")
+    try:
+        await send_verification_code(db, body.email)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"이메일 발송 실패: {str(e)}")
+    return {"message": "인증코드가 발송되었습니다."}
+
+
+@router.post("/password/verify-code", status_code=200, summary="비밀번호 찾기 인증코드 검증")
+async def verify_password_reset_code(body: VerifyRequest, db: AsyncIOMotorDatabase = Depends(db_dep)):
+    """비밀번호 재설정용 인증코드 검증"""
+    ok = await verify_code(db, body.email, body.code)
+    if not ok:
+        raise HTTPException(status_code=400, detail="인증코드가 올바르지 않거나 만료되었습니다.")
+    return {"message": "인증이 완료되었습니다."}
 
 
 class PasswordResetRequest(BaseModel):
@@ -59,11 +89,7 @@ class PasswordResetRequest(BaseModel):
 
 
 @router.post("/password/reset", status_code=200, summary="비밀번호 재설정")
-async def reset_password(
-    body: PasswordResetRequest,
-    db: AsyncIOMotorDatabase = Depends(db_dep)
-):
-    # 인증 완료 여부 확인 (verified=True 상태)
+async def reset_password(body: PasswordResetRequest, db: AsyncIOMotorDatabase = Depends(db_dep)):
     verified = await is_email_verified(db, body.email)
     if not verified:
         raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
@@ -74,14 +100,17 @@ async def reset_password(
     hashed = hash_password(body.new_password)
     result = await db.users.update_one(
         {"email": body.email},
-        {"$set": {"password": hashed}}
+        {"$set": {"hashed_password": hashed}}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="가입된 이메일이 아닙니다.")
-    # 사용한 인증 코드 삭제
     await db.email_verifications.delete_many({"email": body.email})
     return {"message": "비밀번호가 변경되었습니다."}
 
+
+# ────────────────────────────────────────────────
+# 회원가입 / 로그인 / 토큰
+# ────────────────────────────────────────────────
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def signup(body: UserCreate, response: Response, db: AsyncIOMotorDatabase = Depends(db_dep)):
@@ -89,17 +118,14 @@ async def signup(body: UserCreate, response: Response, db: AsyncIOMotorDatabase 
     verified = await is_email_verified(db, body.email)
     if not verified:
         raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
-
     try:
         user = await create_user(db, body)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-
     serialized = serialize_user(user)
     access_token = create_access_token(serialized["id"])
     refresh_token = create_refresh_token(serialized["id"])
     _set_auth_cookies(response, access_token, refresh_token)
-
     return TokenResponse(access_token=access_token, refresh_token=refresh_token, user=UserOut(**serialized))
 
 

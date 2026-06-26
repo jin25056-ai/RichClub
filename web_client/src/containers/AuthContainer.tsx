@@ -170,7 +170,7 @@ const AuthContainer: React.FC = () => {
     if (!resetEmail.includes('@')) { setResetError('올바른 이메일을 입력해주세요.'); return; }
     setResetSending(true); setResetError(null);
     try {
-      await apiClient.post('/api/v1/auth/email/send-code', { email: resetEmail });
+      await apiClient.post('/api/v1/auth/password/send-code', { email: resetEmail });
       setResetStep('code');
       setResetExpire(300);
       if (resetExpireRef.current) clearInterval(resetExpireRef.current);
@@ -189,7 +189,7 @@ const AuthContainer: React.FC = () => {
     if (resetCode.length !== 6) { setResetError('6자리 코드를 입력해주세요.'); return; }
     setResetError(null);
     try {
-      await apiClient.post('/api/v1/auth/email/verify-code', { email: resetEmail, code: resetCode });
+      await apiClient.post('/api/v1/auth/password/verify-code', { email: resetEmail, code: resetCode });
       setResetStep('password');
       if (resetExpireRef.current) clearInterval(resetExpireRef.current);
     } catch (err: any) {
