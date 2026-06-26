@@ -26,6 +26,12 @@ async def run_daily_predict() -> None:
     await run_daily_prediction(db)
 
 
+async def run_daily_seo_predict() -> None:
+    """매일 장 마감 후 seo-model-v1 예측 (KST 15:40 = UTC 06:40)"""
+    db = get_db()
+    from app.ml.seo_predictor import run_daily_seo_prediction
+    await run_daily_seo_prediction(db)
+
 async def run_evaluate() -> None:
     """매일 수익률 계산 + 월별 집계 (UTC 07:00)"""
     db = get_db()
@@ -89,6 +95,12 @@ def start_scheduler() -> None:
     scheduler.add_job(run_daily_predict, trigger="cron",
                       day_of_week="mon-fri", hour="6", minute="35",
                       id="daily_predict", replace_existing=True,
+
+    # seo-model-v1 일별 예측 (KST 15:40 = UTC 06:40) - ju-model 5분 후
+    scheduler.add_job(run_daily_seo_predict, trigger="cron",
+                      day_of_week="mon-fri", hour="6", minute="40",
+                      id="daily_seo_predict", replace_existing=True,
+                      misfire_grace_time=3600)
                       misfire_grace_time=3600)
 
     # 예측 성능 평가 (UTC 07:00) - 예측 완료 후 25분 뒤
