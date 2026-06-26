@@ -277,6 +277,7 @@ export const PlanCard: React.FC<PlanCardProps> = ({ plan, currentPlanId, isAnnua
 
 // 결제 확인 모달
 interface ConfirmModalProps {
+  planId: string;
   planName: string;
   price: string;
   isAnnual: boolean;
@@ -285,7 +286,7 @@ interface ConfirmModalProps {
   loading: boolean;
 }
 
-const ConfirmModal: React.FC<ConfirmModalProps> = ({ planName, price, isAnnual, onConfirm, onCancel, loading }) => (
+const ConfirmModal: React.FC<ConfirmModalProps> = ({ planId, planName, price, isAnnual, onConfirm, onCancel, loading }) => (
   <div
     onClick={onCancel}
     style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -297,8 +298,28 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({ planName, price, isAnnual, 
       <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>플랜 변경 확인</div>
       <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 20, lineHeight: 1.7 }}>
         <span style={{ color: '#d1d5db', fontWeight: 600 }}>{planName}</span> 플랜으로 변경합니다.<br />
-        요금: <span style={{ color: '#d1d5db', fontWeight: 600 }}>{price}</span>
-        {isAnnual && <span style={{ color: '#4ade80', marginLeft: 4, fontSize: 10 }}>(연간 결제 · 20% 할인)</span>}
+        {isAnnual ? (
+          <>
+            {(() => {
+              const plan = PLANS.find(p => p.id === planId);
+              if (!plan) return <span style={{ color: '#d1d5db', fontWeight: 600 }}>{price}</span>;
+              const discounted = Math.floor(plan.monthlyPrice * 0.8);
+              const annual = discounted * 12;
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <span style={{ color: '#4b5563', fontSize: 10, textDecoration: 'line-through', marginRight: 6 }}>
+                      월 {plan.monthlyPrice.toLocaleString('ko-KR')}원
+                    </span>
+                    <span style={{ color: '#d1d5db', fontWeight: 600 }}>월 {discounted.toLocaleString('ko-KR')}원</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </>
+        ) : (
+          <>요금: <span style={{ color: '#d1d5db', fontWeight: 600 }}>{price}</span></>
+        )}
       </div>
       <div style={{ background: '#0a0a14', border: '1px solid #1e1e2e', borderRadius: 6, padding: '10px 12px', marginBottom: 20 }}>
         <div style={{ fontSize: 9, color: '#4b5563', lineHeight: 1.7 }}>
@@ -327,10 +348,11 @@ export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, o
   const [isAnnual, setIsAnnual] = useState(false);
   const [confirm, setConfirm] = useState<{ planId: string; planName: string; price: string } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [successPlan, setSuccessPlan] = useState<{ planId: string; planName: string } | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleSubscribe = (planId: string, planName: string, price: string) => {
-    setSuccessMsg(null);
+    setErrorMsg(null);
     setConfirm({ planId, planName, price });
   };
 
@@ -339,13 +361,14 @@ export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, o
     setLoading(true);
     try {
       await subscribePlan(confirm.planId);
-      setSuccessMsg(`${confirm.planName} 플랜으로 변경되었습니다.`);
       onPlanChanged?.(confirm.planId);
+      setSuccessPlan({ planId: confirm.planId, planName: confirm.planName });
+      setConfirm(null);
     } catch (e: any) {
-      setSuccessMsg(e?.response?.data?.detail ?? '오류가 발생했습니다. 다시 시도해주세요.');
+      setErrorMsg(e?.response?.data?.detail ?? '오류가 발생했습니다. 다시 시도해주세요.');
+      setConfirm(null);
     } finally {
       setLoading(false);
-      setConfirm(null);
     }
   };
 
@@ -389,9 +412,10 @@ export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, o
         </p>
       </div>
 
-      {successMsg && (
-        <div style={{ background: '#14532d', border: '1px solid #166534', borderRadius: 6, padding: '10px 14px', marginBottom: 14, fontSize: 11, color: '#4ade80' }}>
-          {successMsg}
+      {errorMsg && (
+        <div style={{ background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: 6, padding: '10px 14px', marginBottom: 14, fontSize: 11, color: '#f87171', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          {errorMsg}
+          <button onClick={() => setErrorMsg(null)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 14 }}>&#x2715;</button>
         </div>
       )}
 
@@ -413,6 +437,7 @@ export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, o
 
       {confirm && (
         <ConfirmModal
+          planId={confirm.planId}
           planName={confirm.planName}
           price={confirm.price}
           isAnnual={isAnnual}
@@ -420,6 +445,30 @@ export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, o
           onCancel={() => setConfirm(null)}
           loading={loading}
         />
+      )}
+
+      {successPlan && (
+        <div
+          onClick={() => setSuccessPlan(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '28px 28px', width: 360, maxWidth: '90vw' }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>플랜 변경 완료</div>
+            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 20, lineHeight: 1.7 }}>
+              <span style={{ color: '#d1d5db', fontWeight: 600 }}>{successPlan.planName}</span> 플랜으로 변경되었습니다.<br />
+              변경된 플랜이 즉시 적용됩니다.
+            </div>
+            <button
+              onClick={() => setSuccessPlan(null)}
+              style={{ width: '100%', padding: '9px 0', background: '#6366f1', border: 'none', borderRadius: 6, color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+            >
+              확인
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
