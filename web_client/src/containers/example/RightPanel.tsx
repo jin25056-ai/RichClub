@@ -11,6 +11,7 @@ interface Props {
   onSelectStock: (stockCode: string, stockName: string) => void;
   selectedCode?: string;
   onWatchChange?: (code: string, id: string | null) => void;
+  modelId?: string;
 }
 
 const fmtPrice = (p: number) =>
@@ -34,7 +35,7 @@ const UpdateNotice: React.FC = () => (
   </div>
 );
 
-const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChange }) => {
+const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChange, modelId = 'ju-model-v2' }) => {
   const [tab, setTab] = useState<RightTab>('ai');
 
   type TodaySignalItem = {
@@ -59,7 +60,7 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
 
   const fetchPredictions = (signal: '' | '매수' | '매도' | '관망') => {
     setLoading(true);
-    stockApi.getPredictions(signal || undefined, 100)
+    stockApi.getPredictions(signal || undefined, 100, modelId)
       .then((res) => setItems(res.data))
       .finally(() => setLoading(false));
   };
@@ -78,10 +79,10 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
 
   const fetchIndicators = useCallback((days: number) => {
     setIndLoading(true);
-    stockApi.getTodaySignals(days)
+    stockApi.getTodaySignals(days, modelId)
       .then((res) => setIndItems(res.data))
       .finally(() => setIndLoading(false));
-  }, []);
+  }, [modelId]);
 
   type NewsItem = { title: string; originallink: string; link: string; description: string; pubDate: string; };
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);

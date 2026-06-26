@@ -64,7 +64,6 @@ export interface WinRateResponse {
 export interface StockItem { stock_code: string; stock_name: string; }
 export interface StockSearchResult { stock_code: string; stock_name: string; }
 
-// 관심종목
 export interface WatchlistItem {
   id: string;
   stock_code: string;
@@ -76,7 +75,6 @@ export interface WatchlistItem {
   current_price: number | null;
 }
 
-// 매매일지
 export interface TradeLogItem {
   id: string;
   stock_code: string;
@@ -97,20 +95,26 @@ export interface TradeLogCreate {
   memo?: string;
 }
 
+const DEFAULT_MODEL = 'ju-model-v2';
+
 export const stockApi = {
   search: (q: string) =>
     apiClient.get<StockItem[]>('/api/v1/stock/search', { params: { q } }),
 
-  getPredictions: (signal?: string, limit = 50, stock_name?: string) =>
+  getPredictions: (signal?: string, limit = 50, modelId = DEFAULT_MODEL, stock_name?: string) =>
     apiClient.get<AIPredictionItem[]>('/api/v1/stock/ai/predictions', {
-      params: { signal, limit, stock_name },
+      params: { signal, limit, stock_name, model_id: modelId },
     }),
 
-  getTodayPredictions: (signal?: string) =>
-    apiClient.get<AIPredictionItem[]>('/api/v1/stock/ai/today', { params: { signal } }),
+  getTodayPredictions: (signal?: string, modelId = DEFAULT_MODEL) =>
+    apiClient.get<AIPredictionItem[]>('/api/v1/stock/ai/today', {
+      params: { signal, model_id: modelId },
+    }),
 
-  getAIDetail: (stock_code: string) =>
-    apiClient.get<AIDetailResponse>(`/api/v1/stock/ai/detail/${stock_code}`),
+  getAIDetail: (stock_code: string, modelId = DEFAULT_MODEL) =>
+    apiClient.get<AIDetailResponse>(`/api/v1/stock/ai/detail/${stock_code}`, {
+      params: { model_id: modelId },
+    }),
 
   getRSI: (stock_code: string, period = 'all') =>
     apiClient.get<RSIResponse>(`/api/v1/stock/chart/rsi/${stock_code}`, { params: { period } }),
@@ -118,8 +122,10 @@ export const stockApi = {
   getMACD: (stock_code: string, period = 'all') =>
     apiClient.get<MACDResponse>(`/api/v1/stock/chart/macd/${stock_code}`, { params: { period } }),
 
-  getCandles: (stock_code: string, days = 0) =>
-    apiClient.get<CandleResponse>(`/api/v1/stock/chart/candle/${stock_code}`, { params: { days } }),
+  getCandles: (stock_code: string, days = 0, modelId = DEFAULT_MODEL) =>
+    apiClient.get<CandleResponse>(`/api/v1/stock/chart/candle/${stock_code}`, {
+      params: { days, model_id: modelId },
+    }),
 
   getCandles5m: (stock_code: string, days = 1) =>
     apiClient.get<CandleResponse>(`/api/v1/stock/chart/candle5m/${stock_code}`, { params: { days } }),
@@ -145,14 +151,14 @@ export const stockApi = {
       }[];
     }>('/api/v1/news', { params: { query: query ?? '주식 증권', display: 20 } }),
 
-  getTodaySignals: (days = 1) =>
+  getTodaySignals: (days = 1, modelId = DEFAULT_MODEL) =>
     apiClient.get<{
       stock_code: string; stock_name: string;
       signal: string; sub: string;
       tags: { label: string; color: string }[];
       close: number | null; rsi: number | null;
       ma_align: string; macd_bull: boolean | null;
-    }[]>(`/api/v1/stock/today-signals?days=${days}`),
+    }[]>('/api/v1/stock/today-signals', { params: { days, model_id: modelId } }),
 };
 
 export const marketApi = {

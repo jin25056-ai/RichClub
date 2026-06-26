@@ -9,6 +9,7 @@ import { stockApi, watchlistApi } from '../api/stock';
 import { getMe, logout } from '../api/auth';
 import { User } from '../types';
 import { PricingContent } from './PricingPage';
+import { useModel } from '../contexts/ModelContext';
 import '../styles/example.css';
 
 type Period = '1m' | '3m' | '6m';
@@ -90,6 +91,7 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({ user, onLogout, onPri
 const ExamplePage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { models, selectedModel, setSelectedModel } = useModel();
   const [selectedStock, setSelectedStock] = useState<{ code: string; name: string } | null>(null);
   const [currentName, setCurrentName] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period>('3m');
@@ -169,6 +171,29 @@ const ExamplePage: React.FC = () => {
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0, flexWrap: 'wrap' }}>
       <h1 style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', margin: 0, flexShrink: 0 }}>RichClub AI</h1>
+      {/* 모델 선택 */}
+      {models.length > 0 && (
+        <div style={{ display: 'inline-flex', background: '#0d0d1a', border: '1px solid #2a2a3d', borderRadius: 4, overflow: 'hidden', flexShrink: 0 }}>
+          {models.map((m, i) => (
+            <button
+              key={m.id}
+              disabled={!m.available}
+              onClick={() => m.available && setSelectedModel(m.id)}
+              title={m.available ? m.name : `${m.name} (플랜 업그레이드 필요)`}
+              style={{
+                padding: '3px 10px', fontSize: 10, border: 'none',
+                borderRight: i < models.length - 1 ? '1px solid #2a2a3d' : 'none',
+                cursor: m.available ? 'pointer' : 'not-allowed',
+                background: selectedModel === m.id ? '#1e1e35' : 'transparent',
+                color: !m.available ? '#2d2d3d' : selectedModel === m.id ? '#a5b4fc' : '#555',
+                fontWeight: selectedModel === m.id ? 600 : 400,
+              }}
+            >
+              {m.name}
+            </button>
+          ))}
+        </div>
+      )}
       <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} searchOnly />
       {!mobile && (['1m', '3m', '6m'] as Period[]).map((p) => (
         <button key={p} onClick={() => setPeriod(p)}
@@ -244,7 +269,7 @@ const ExamplePage: React.FC = () => {
           )}
           {activeTab === 'ai' && (
             <div style={{ ...panel, minHeight: '60vh' }}>
-              <RightPanel onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} />
+              <RightPanel onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} modelId={selectedModel} />
             </div>
           )}
           {activeTab === 'market' && (
@@ -305,7 +330,7 @@ const ExamplePage: React.FC = () => {
           <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} onPriceUpdate={setCurrentPrice} />
         </div>
         <div style={{ width: 195, flexShrink: 0, ...panel, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
-          <RightPanel onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} />
+          <RightPanel onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} modelId={selectedModel} />
         </div>
       </div>
     </div>
