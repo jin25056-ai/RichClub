@@ -171,29 +171,6 @@ const ExamplePage: React.FC = () => {
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0, flexWrap: 'wrap' }}>
       <h1 style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', margin: 0, flexShrink: 0 }}>RichClub AI</h1>
-      {/* 모델 선택 */}
-      {models.length > 0 && (
-        <div style={{ display: 'inline-flex', background: '#0d0d1a', border: '1px solid #2a2a3d', borderRadius: 4, overflow: 'hidden', flexShrink: 0 }}>
-          {models.map((m, i) => (
-            <button
-              key={m.id}
-              disabled={!m.available}
-              onClick={() => m.available && setSelectedModel(m.id)}
-              title={m.available ? m.name : `${m.name} (플랜 업그레이드 필요)`}
-              style={{
-                padding: '3px 10px', fontSize: 10, border: 'none',
-                borderRight: i < models.length - 1 ? '1px solid #2a2a3d' : 'none',
-                cursor: m.available ? 'pointer' : 'not-allowed',
-                background: selectedModel === m.id ? '#1e1e35' : 'transparent',
-                color: !m.available ? '#2d2d3d' : selectedModel === m.id ? '#a5b4fc' : '#555',
-                fontWeight: selectedModel === m.id ? 600 : 400,
-              }}
-            >
-              {m.name}
-            </button>
-          ))}
-        </div>
-      )}
       <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} searchOnly />
       {!mobile && (['1m', '3m', '6m'] as Period[]).map((p) => (
         <button key={p} onClick={() => setPeriod(p)}
@@ -264,7 +241,7 @@ const ExamplePage: React.FC = () => {
         <div style={{ flex: 1, padding: '0 12px', overflow: 'hidden' }}>
           {activeTab === 'chart' && (
             <div style={{ ...panel, height: 'calc(100vh - 130px)', overflow: 'hidden' }}>
-              <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} />
+              <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} modelId={selectedModel} />
             </div>
           )}
           {activeTab === 'ai' && (
@@ -306,6 +283,31 @@ const ExamplePage: React.FC = () => {
       {pricingModal}
       <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
         <div style={{ width: 190, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
+          {/* 모델 선택 드롭다운 */}
+          {models.length > 0 && (
+            <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '8px 12px' }}>
+              <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 6 }}>AI 모델</div>
+              <select
+                value={selectedModel}
+                onChange={(e) => {
+                  const model = models.find((m) => m.id === e.target.value);
+                  if (model?.available) setSelectedModel(e.target.value);
+                }}
+                style={{
+                  width: '100%', background: '#1e1e2e', border: '1px solid #2d2d3d',
+                  borderRadius: 4, color: '#a5b4fc', fontSize: 11, fontWeight: 600,
+                  padding: '4px 8px', cursor: 'pointer', outline: 'none',
+                }}
+              >
+                {models.map((m) => (
+                  <option key={m.id} value={m.id} disabled={!m.available}
+                    style={{ color: m.available ? '#a5b4fc' : '#4b5563' }}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div style={panel}>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>글로벌 시장</span>
@@ -327,7 +329,7 @@ const ExamplePage: React.FC = () => {
           </div>
         </div>
         <div style={{ flex: 1, minWidth: 0, ...panel, overflow: 'hidden' }}>
-          <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} onPriceUpdate={setCurrentPrice} />
+          <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} onPriceUpdate={setCurrentPrice} modelId={selectedModel} />
         </div>
         <div style={{ width: 195, flexShrink: 0, ...panel, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
           <RightPanel onSelectStock={handleSelectStock} selectedCode={selectedStock?.code} onWatchChange={(code, id) => { if (code === selectedStock?.code) setWatchId(id); }} modelId={selectedModel} />
