@@ -46,6 +46,7 @@ export interface GlobalMarketResponse {
 }
 
 export interface TradeRecord {
+  stock_code?: string; stock_name?: string;
   buy_date: string; buy_price: number;
   sell_date: string | null; sell_price: number | null;
   return_pct: number | null; unrealized_pct: number | null;
@@ -59,6 +60,22 @@ export interface WinRateResult {
 export interface WinRateResponse {
   stock_code: string | null; stock_name: string | null; period: string;
   results: WinRateResult[]; trades: TradeRecord[]; updated_at: string;
+}
+
+export interface HoldingItem {
+  stock_code: string; stock_name: string;
+  buy_date: string; buy_price: number;
+  current_price: number; unrealized_pct: number;
+}
+
+export interface PerformanceResponse {
+  model_id: string; period: string;
+  win_rate: number; cumulative_return_pct: number;
+  total_trades: number; win_count: number; lose_count: number;
+  avg_return_pct: number; max_return_pct: number; max_loss_pct: number;
+  holdings: HoldingItem[];
+  trades: TradeRecord[];
+  updated_at: string;
 }
 
 export interface StockItem { stock_code: string; stock_name: string; }
@@ -173,9 +190,13 @@ export const marketApi = {
   getWinRateIndicator: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/indicator', { params }),
 
-  getWinRateSimple: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
+  getWinRateSimple: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string; model_id?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/simple', { params }),
+
+  getPerformance: (model_id: string, period?: string) =>
+    apiClient.get<PerformanceResponse>(`/api/v1/market/performance/${model_id}`, { params: { period } }),
 };
+
 
 export const watchlistApi = {
   get: () =>

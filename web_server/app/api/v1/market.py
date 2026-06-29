@@ -1,5 +1,5 @@
 """
-글로벌 시장 현황 + 승률 테스트 API
+글로벌 시장 현황 + 승률 테스트 + AI 실적 API
 - Yahoo Finance 429 방지: 서버 메모리 캐시 10분
 - MA60 하락 구간: 매수 금지 (침체 구간)
 """
@@ -40,6 +40,8 @@ class GlobalMarketResponse(BaseModel):
 
 
 class TradeRecord(BaseModel):
+    stock_code: Optional[str] = None
+    stock_name: Optional[str] = None
     buy_date: str
     buy_price: float
     sell_date: Optional[str] = None
@@ -67,6 +69,31 @@ class WinRateResponse(BaseModel):
     stock_name: Optional[str]
     period: str
     results: List[WinRateResult]
+    trades: List[TradeRecord]
+    updated_at: datetime
+
+
+class HoldingItem(BaseModel):
+    stock_code: str
+    stock_name: str
+    buy_date: str
+    buy_price: float
+    current_price: float
+    unrealized_pct: float
+
+
+class PerformanceResponse(BaseModel):
+    model_id: str
+    period: str
+    win_rate: float
+    cumulative_return_pct: float
+    total_trades: int
+    win_count: int
+    lose_count: int
+    avg_return_pct: float
+    max_return_pct: float
+    max_loss_pct: float
+    holdings: List[HoldingItem]
     trades: List[TradeRecord]
     updated_at: datetime
 
@@ -348,6 +375,125 @@ async def _load_ichimoku_map(db, stock_codes: list, since: datetime) -> dict:
             entry[date_str] = (span_a, span_b)
         ichimoku_map[sc] = entry
     return ichimoku_map
+
+
+@router.get("/performance/{model_id}", response_model=PerformanceResponse, summary="AI 모델 실적")
+async def get_model_performance(
+    model_id: str,
+    period: str = Query("3m"),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """AI 모델 전 종목 실적 - 매수 시그널 기반 거래 집계"""
+    if period not in PERIOD_DAYS_MAP:
+        raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
+
+    since = datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS_MAP[period])
+    until = datetime.now(timezone.utc) + timedelta(days=1)
+
+    query: dict = {
+        "model_id": model_id,
+        "predicted_at": {"$gte": since, "$lt": until},
+    }
+
+    docs = [doc async for doc in db.total_trading_signals.find(query).sort("predicted_at", 1)]
+    if not docs:
+        raise HTTPException(status_code=404, detail="해당 모델의 데이터가 없습니다.")
+
+    sc_docs: dict = defaultdict(list)
+    sc_name: dict = {}
+    for doc in docs:
+        sc = doc.get("stock_code", "")
+        if sc:
+            sc_docs[sc].append(doc)
+            if sc not in sc_name:
+                sc_name[sc] = doc.get("stock_name", sc)
+
+    ichimoku_map = await _load_ichimoku_map(db, list(sc_docs.keys()), since)
+
+    all_trades: list = []
+    realized_returns: list = []
+    holdings: list = []
+
+    for sc, sdocs in sc_docs.items():
+        position = None
+        latest_price = None
+        latest_date = None
+        prev_ma60 = None
+        ichi = ichimoku_map.get(sc, {})
+        name = sc_name.get(sc, sc)
+
+        for doc in sdocs:
+            signal = doc.get("signal", "관망")
+            dt = _to_date(doc.get("predicted_at"))
+            close = doc.get("close")
+            ma60 = doc.get("ma60")
+            if close is None or float(close) <= 0:
+                continue
+            close = float(close)
+            latest_price = close
+            latest_date = dt.strftime("%Y-%m-%d")
+            date_str = dt.strftime("%Y-%m-%d")
+
+            span_a, span_b = ichi.get(date_str, (None, None))
+            stagnant = _is_ichimoku_stagnant(close, span_a, span_b) or _ma60_falling(ma60, prev_ma60)
+
+            if signal == "매수" and position is None and not stagnant:
+                position = {"buy_date": date_str, "buy_price": close, "name": name}
+            elif signal == "매도" and position is not None:
+                ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
+                all_trades.append(TradeRecord(
+                    stock_code=sc, stock_name=name,
+                    buy_date=position["buy_date"], buy_price=position["buy_price"],
+                    sell_date=date_str, sell_price=close, return_pct=ret_pct,
+                ))
+                realized_returns.append(ret_pct)
+                position = None
+
+            if ma60 is not None:
+                prev_ma60 = float(ma60)
+
+        # 미청산 보유 종목
+        if position is not None and latest_price is not None:
+            unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
+            holdings.append(HoldingItem(
+                stock_code=sc, stock_name=name,
+                buy_date=position["buy_date"], buy_price=position["buy_price"],
+                current_price=latest_price, unrealized_pct=unrealized_pct,
+            ))
+            all_trades.append(TradeRecord(
+                stock_code=sc, stock_name=name,
+                buy_date=position["buy_date"], buy_price=position["buy_price"],
+                sell_date=None, sell_price=latest_price, unrealized_pct=unrealized_pct,
+            ))
+
+    # 집계
+    win = [r for r in realized_returns if r > 0]
+    lose = [r for r in realized_returns if r <= 0]
+    total = len(realized_returns)
+    cumulative = 1.0
+    for r in realized_returns:
+        cumulative *= (1 + r / 100)
+
+    # 최신순 정렬
+    all_trades.sort(key=lambda t: t.buy_date, reverse=True)
+    holdings.sort(key=lambda h: h.unrealized_pct, reverse=True)
+
+    return PerformanceResponse(
+        model_id=model_id,
+        period=period,
+        win_rate=round(len(win) / total * 100, 1) if total > 0 else 0,
+        cumulative_return_pct=round((cumulative - 1) * 100, 2),
+        total_trades=total,
+        win_count=len(win),
+        lose_count=len(lose),
+        avg_return_pct=round(sum(realized_returns) / total, 2) if total > 0 else 0,
+        max_return_pct=round(max(realized_returns), 2) if realized_returns else 0,
+        max_loss_pct=round(min(realized_returns), 2) if realized_returns else 0,
+        holdings=holdings,
+        trades=all_trades,
+        updated_at=datetime.now(timezone.utc),
+    )
 
 
 @router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트 (AI) - 침체구간 제외")
@@ -643,7 +789,6 @@ async def get_win_rate_indicator(
     since = _parse_date_input(start_date) if start_date else datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS_MAP[period])
     until = (_parse_date_input(end_date) + timedelta(days=1)) if end_date else datetime.now(timezone.utc) + timedelta(days=1)
 
-    # 지표 탭은 model_id 필터 없이 전체 데이터 사용 (중복 제거를 위해 ju-model-v2 기준)
     query: dict = {
         "predicted_at": {"$gte": since, "$lt": until},
         "model_id": "ju-model-v2",
