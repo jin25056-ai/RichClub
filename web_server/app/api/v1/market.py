@@ -4,6 +4,7 @@
 - MA60 하락 구간: 매수 금지 (침체 구간)
 """
 import asyncio
+import random
 import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -499,7 +500,6 @@ async def get_model_performance(
     win = [r for r in realized_returns if r > 0]
     lose = [r for r in realized_returns if r <= 0]
     total = len(realized_returns)
-    # 단순 합산 (복리 계산 시 비현실적 수치 방지)
     cumulative_pct = round(sum(realized_returns), 2) if realized_returns else 0.0
 
     all_trades.sort(key=lambda t: t.buy_date, reverse=True)
@@ -536,11 +536,13 @@ async def get_simulation(
     _: dict = Depends(get_current_user),
 ):
     """
-    포트폴리오 시뮬레이션
-    - 투자금을 max_stocks로 균등 분배
-    - 매수 시그널마다 종목당 투자금으로 진입
-    - 매도 시그널에 청산, 손익 반영
+    포트폴리오 시뮬레이션 (현실적 방식)
+    - 종목당 투자금 = 전체 투자금 / max_stocks (균등 분배)
+    - 주가 체크: buy_price > 종목당 투자금이면 살 수 없으므로 스킵
+    - 실제 투자금 = floor(종목당투자금 / 주가) * 주가 (잔돈은 현금으로 남김)
+    - 같은 날 여러 매수 신호 발생 시 랜덤으로 선택 (편향 방지)
     - 동시 보유 max_stocks 초과 시 신규 매수 스킵
+    - 매도 먼저 처리 후 매수 진입
     """
     years_to_sim = [year] if year else list(range(2021, datetime.now().year + 1))
     per_stock = principal / max_stocks
@@ -564,14 +566,13 @@ async def get_simulation(
         if not docs:
             continue
 
-        # 종목별로 그룹화
         sc_docs: dict = defaultdict(list)
         for doc in docs:
             sc = doc.get("stock_code", "")
             if sc:
                 sc_docs[sc].append(doc)
 
-        # 날짜별 이벤트 수집 (매수/매도)
+        # 날짜별 이벤트 수집
         events: list = []
         for sc, sdocs in sc_docs.items():
             position = None
@@ -598,30 +599,58 @@ async def get_simulation(
                 if ma60 is not None:
                     prev_ma60 = float(ma60)
 
-        # 날짜순 정렬 후 시뮬레이션
-        events.sort(key=lambda e: e["date"])
-        holdings_map: dict = {}  # sc -> 투자금
+        # 날짜별 매수/매도 분리
+        buy_by_date: dict = defaultdict(list)
+        sell_by_date: dict = defaultdict(list)
+        for ev in events:
+            if ev["type"] == "buy":
+                buy_by_date[ev["date"]].append(ev)
+            else:
+                sell_by_date[ev["date"]].append(ev)
+
+        all_dates = sorted(set(list(buy_by_date.keys()) + list(sell_by_date.keys())))
+
+        holdings_map: dict = {}  # sc -> {"invested": float, "buy_price": float}
         year_profit = 0.0
         win_count = 0
         lose_count = 0
         returns: list = []
 
-        for ev in events:
-            sc = ev["sc"]
-            if ev["type"] == "buy":
-                if sc not in holdings_map and len(holdings_map) < max_stocks:
-                    holdings_map[sc] = per_stock
-            elif ev["type"] == "sell":
+        for date_str in all_dates:
+            # 매도 먼저 처리
+            for ev in sell_by_date.get(date_str, []):
+                sc = ev["sc"]
                 if sc in holdings_map:
-                    invested = holdings_map.pop(sc)
+                    h = holdings_map.pop(sc)
                     ret_pct = (ev["sell_price"] - ev["buy_price"]) / ev["buy_price"]
-                    profit = invested * ret_pct
+                    profit = h["invested"] * ret_pct
                     year_profit += profit
                     returns.append(ret_pct * 100)
                     if profit > 0:
                         win_count += 1
                     else:
                         lose_count += 1
+
+            # 매수: 같은 날 신호 랜덤 셔플 후 순서대로 진입 시도
+            buys = buy_by_date.get(date_str, [])
+            if buys:
+                random.shuffle(buys)
+                for ev in buys:
+                    sc = ev["sc"]
+                    buy_price = ev["price"]
+                    if sc in holdings_map:
+                        continue
+                    if len(holdings_map) >= max_stocks:
+                        break
+                    # 주가가 종목당 투자금보다 비싸면 살 수 없음
+                    if buy_price > per_stock:
+                        continue
+                    # 실제 매수: 살 수 있는 주수 * 주가 (잔돈은 현금으로)
+                    shares = int(per_stock // buy_price)
+                    if shares <= 0:
+                        continue
+                    actual_invested = shares * buy_price
+                    holdings_map[sc] = {"invested": actual_invested, "buy_price": buy_price}
 
         total_trades = win_count + lose_count
         final = running_amount + year_profit
