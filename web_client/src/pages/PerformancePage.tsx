@@ -28,17 +28,17 @@ const CALC_MODES: { key: CalcMode; label: string; desc: string }[] = [
   {
     key: 'sum',
     label: '합산',
-    desc: '모든 거래 수익률을 단순 더한 값. 거래 횟수가 많을수록 커집니다.',
+    desc: '완료된 모든 거래의 수익률을 단순 합산합니다. (+와 - 모두 포함) 예: +10%, -5%, +20% → +25%. 고수익 거래가 있으면 크게 올라갑니다.',
   },
   {
     key: 'avg',
     label: '평균',
-    desc: '거래 1건당 평균 수익률. 거래 횟수와 무관하게 모델 실력을 비교할 때 유용합니다.',
+    desc: '거래 1건당 평균 수익률입니다. 거래 횟수와 무관하게 모델의 실력을 비교할 때 유용합니다. 예: +10%, -5%, +20% → 평균 +8.33%.',
   },
   {
     key: 'compound',
     label: '복리',
-    desc: '매 거래 수익을 재투자한다고 가정한 누적 수익률. 거래가 많으면 비현실적으로 커질 수 있습니다.',
+    desc: '매 거래 후 수익을 재투자한다고 가정한 누적 수익률입니다. 예: +10%, -5%, +20% → (1.1 × 0.95 × 1.2 - 1) = +25.3%. 거래가 많을수록 비현실적으로 커질 수 있습니다.',
   },
 ];
 
@@ -46,7 +46,6 @@ function calcCumulative(returns: number[], mode: CalcMode): number {
   if (returns.length === 0) return 0;
   if (mode === 'sum') return parseFloat(returns.reduce((a, b) => a + b, 0).toFixed(2));
   if (mode === 'avg') return parseFloat((returns.reduce((a, b) => a + b, 0) / returns.length).toFixed(2));
-  // compound
   let c = 1.0;
   for (const r of returns) c *= (1 + r / 100);
   return parseFloat(((c - 1) * 100).toFixed(2));
@@ -173,11 +172,15 @@ const PerformancePage: React.FC = () => {
                     </button>
                   </div>
                   {showModeInfo && (
-                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {CALC_MODES.map((m) => (
                         <div key={m.key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                          <span style={{ fontSize: 9, fontWeight: 700, color: calcMode === m.key ? '#a5b4fc' : '#4b5563', flexShrink: 0, width: 30 }}>{m.label}</span>
-                          <span style={{ fontSize: 9, color: '#6b7280', lineHeight: 1.5 }}>{m.desc}</span>
+                          <span style={{
+                            fontSize: 9, fontWeight: 700,
+                            color: calcMode === m.key ? '#a5b4fc' : '#4b5563',
+                            flexShrink: 0, width: 32,
+                          }}>{m.label}</span>
+                          <span style={{ fontSize: 9, color: '#6b7280', lineHeight: 1.6 }}>{m.desc}</span>
                         </div>
                       ))}
                     </div>
