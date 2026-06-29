@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 _RETRY_COUNT = 3
 _RETRY_DELAY = 5
 
+MODEL_ID = 'ju-model-v2'
+
 
 def _safe(v):
     try:
@@ -35,7 +37,6 @@ def _safe(v):
 def _build_features_for_predict(raw: pd.DataFrame, market_map: dict, stock_name: str) -> pd.DataFrame:
     """
     예측 전용 feature 계산 - target 레이블링/필터링 없이 전 행 반환.
-    _build_features와 동일한 feature 계산만 수행.
     """
     df = raw.copy()
     if isinstance(df.columns, pd.MultiIndex):
@@ -118,6 +119,7 @@ async def _upsert_signal(col, name, code, dt, row, model):
     signal = LABEL_MAP.get(pred_label, '관망')
     predicted_at = datetime(dt.year, dt.month, dt.day)
     doc = {
+        'model_id': MODEL_ID,
         'stock_code': code, 'stock_name': name,
         'close': _safe(row.get('close')), 'open': _safe(row.get('open')),
         'high': _safe(row.get('high')), 'low': _safe(row.get('low')),
@@ -136,7 +138,7 @@ async def _upsert_signal(col, name, code, dt, row, model):
         'is_correct_5d': None,
     }
     await col.update_one(
-        {'stock_name': name, 'predicted_at': predicted_at},
+        {'model_id': MODEL_ID, 'stock_name': name, 'predicted_at': predicted_at},
         {'$set': doc}, upsert=True
     )
     return True
@@ -157,7 +159,7 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
     logger.info(f"[predictor] 예측 시작: {today}")
 
     col = db.total_trading_signals
-    await col.create_index([("stock_name", ASCENDING), ("predicted_at", ASCENDING)])
+    await col.create_index([("model_id", ASCENDING), ("stock_name", ASCENDING), ("predicted_at", ASCENDING)])
 
     buf_start = (datetime.strptime(today, '%Y-%m-%d') - timedelta(days=120)).strftime('%Y-%m-%d')
     end_dt = (datetime.strptime(today, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
@@ -188,7 +190,6 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
             logger.error(f"[predictor] {name}({ticker}) 예측 최종 실패: {e}")
             failed_tickers.append((ticker, name, code))
 
-    # 실패 종목 1회 추가 재시도
     if failed_tickers:
         logger.warning(f"[predictor] 실패 종목 {len(failed_tickers)}개 재시도: {[n for _, n, _ in failed_tickers]}")
         await asyncio.sleep(10)
@@ -217,7 +218,6 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
 async def calculate_returns(db: AsyncIOMotorDatabase):
     """
     total_trading_signals에서 종목별 매수->매도 포지션 추적으로 수익률 계산
-    결과를 각 매수 신호 도큐먼트에 ret_realized / is_correct 필드로 저장
     """
     col = db.total_trading_signals
     pipeline = [
@@ -293,7 +293,6 @@ async def calculate_returns(db: AsyncIOMotorDatabase):
 async def aggregate_monthly_performance(db: AsyncIOMotorDatabase):
     """
     total_trading_signals에서 매수->매도 실현 수익률 기반 월별 집계
-    -> model_performance_monthly 저장
     """
     pipeline = [
         {'$match': {'signal': '매수', 'ret_realized': {'$ne': None}}},
