@@ -30,7 +30,7 @@ MODEL_CONFIGS = {
         "csv_encoding": "cp949",
     },
     "seo-model-v2": {
-        "model_dir": "/app/models/seo-model-v2/train_pklFile",
+        "model_dir": "/app/models/seo-model-v2",
         "csv_dir": "/app/collect_data/seojin",
         "csv_encoding": "utf-8-sig",
     },
