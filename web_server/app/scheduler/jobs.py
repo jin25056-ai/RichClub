@@ -57,9 +57,30 @@ async def run_daily_seo_predict() -> None:
                           interval='1d', progress=False, auto_adjust=True)
         if not raw.empty:
             logger.info(f"[seo_predictor] {today} 데이터 확인됨, 예측 시작")
-            await run_daily_seo_prediction(db, target_date=today)
+            await run_daily_seo_prediction(db, model_id="seo-model-v1", target_date=today)
             break
         logger.info(f"[seo_predictor] {today} 데이터 아직 없음, 10분 후 재시도")
+        await asyncio.sleep(600)
+
+
+async def run_daily_seo_v2_predict() -> None:
+    """매일 장 마감 후 seo-model-v2 예측 - 데이터 없으면 10분마다 재시도"""
+    import yfinance as yf
+    from datetime import timedelta
+    db = get_db()
+    from app.ml.seo_predictor import run_daily_seo_prediction
+
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime('%Y-%m-%d')
+
+    while True:
+        raw = yf.download('005930.KS', start=today, end=tomorrow,
+                          interval='1d', progress=False, auto_adjust=True)
+        if not raw.empty:
+            logger.info(f"[seo_predictor_v2] {today} 데이터 확인됨, 예측 시작")
+            await run_daily_seo_prediction(db, model_id="seo-model-v2", target_date=today)
+            break
+        logger.info(f"[seo_predictor_v2] {today} 데이터 아직 없음, 10분 후 재시도")
         await asyncio.sleep(600)
 
 
@@ -124,6 +145,12 @@ def start_scheduler() -> None:
     scheduler.add_job(run_daily_seo_predict, trigger="cron",
                       day_of_week="mon-fri", hour="6", minute="40",
                       id="daily_seo_predict", replace_existing=True,
+                      misfire_grace_time=3600)
+
+    # seo-model-v2 일별 예측 (KST 15:45 = UTC 06:45) - 데이터 없으면 10분마다 재시도
+    scheduler.add_job(run_daily_seo_v2_predict, trigger="cron",
+                      day_of_week="mon-fri", hour="6", minute="45",
+                      id="daily_seo_v2_predict", replace_existing=True,
                       misfire_grace_time=3600)
 
     scheduler.add_job(run_evaluate, trigger="cron",
