@@ -506,7 +506,7 @@ async def get_model_performance(
     holdings.sort(key=lambda h: h.unrealized_pct, reverse=True)
     completed = [t for t in all_trades if t.return_pct is not None]
     open_t = [t for t in all_trades if t.unrealized_pct is not None]
-    all_trades = completed[:200] + open_t
+    all_trades = completed + open_t
 
     return PerformanceResponse(
         model_id=model_id,
