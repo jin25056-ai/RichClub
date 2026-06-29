@@ -22,6 +22,36 @@ const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: CURRENT_YEAR - 2020 }, (_, i) => CURRENT_YEAR - i);
 const MAX_STOCK_OPTIONS = [5, 10, 20, 30, 50];
 
+type CalcMode = 'sum' | 'avg' | 'compound';
+
+const CALC_MODES: { key: CalcMode; label: string; desc: string }[] = [
+  {
+    key: 'sum',
+    label: '합산',
+    desc: '모든 거래 수익률을 단순 더한 값. 거래 횟수가 많을수록 커집니다.',
+  },
+  {
+    key: 'avg',
+    label: '평균',
+    desc: '거래 1건당 평균 수익률. 거래 횟수와 무관하게 모델 실력을 비교할 때 유용합니다.',
+  },
+  {
+    key: 'compound',
+    label: '복리',
+    desc: '매 거래 수익을 재투자한다고 가정한 누적 수익률. 거래가 많으면 비현실적으로 커질 수 있습니다.',
+  },
+];
+
+function calcCumulative(returns: number[], mode: CalcMode): number {
+  if (returns.length === 0) return 0;
+  if (mode === 'sum') return parseFloat(returns.reduce((a, b) => a + b, 0).toFixed(2));
+  if (mode === 'avg') return parseFloat((returns.reduce((a, b) => a + b, 0) / returns.length).toFixed(2));
+  // compound
+  let c = 1.0;
+  for (const r of returns) c *= (1 + r / 100);
+  return parseFloat(((c - 1) * 100).toFixed(2));
+}
+
 const PerformancePage: React.FC = () => {
   const navigate = useNavigate();
   const { models, selectedModel, setSelectedModel } = useModel();
@@ -31,6 +61,8 @@ const PerformancePage: React.FC = () => {
   const [period, setPeriod] = useState<string>('3m');
   const [perfYear, setPerfYear] = useState<number | undefined>(undefined);
   const [activeTab, setActiveTab] = useState<'holdings' | 'trades'>('holdings');
+  const [calcMode, setCalcMode] = useState<CalcMode>('sum');
+  const [showModeInfo, setShowModeInfo] = useState(false);
 
   const [simData, setSimData] = useState<SimulationResponse | null>(null);
   const [simLoading, setSimLoading] = useState(false);
@@ -61,6 +93,9 @@ const PerformancePage: React.FC = () => {
   }, [selectedModel, period, perfYear]);
 
   const completedTrades = perfData?.trades.filter((t) => t.return_pct != null) ?? [];
+  const completedReturns = completedTrades.map((t) => t.return_pct as number);
+  const displayCumulative = calcCumulative(completedReturns, calcMode);
+  const currentModeInfo = CALC_MODES.find((m) => m.key === calcMode)!;
   const principalNum = parseFloat(principal.replace(/,/g, '')) || 0;
 
   return (
@@ -120,12 +155,56 @@ const PerformancePage: React.FC = () => {
               <div style={{ textAlign: 'center', padding: '60px 0', color: '#4b5563' }}>데이터 없음</div>
             ) : (
               <>
+                {/* 수익률 계산 방식 선택 */}
+                <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 10, color: '#4b5563', flexShrink: 0 }}>수익률 기준</span>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {CALC_MODES.map((m) => (
+                        <button key={m.key} onClick={() => setCalcMode(m.key)}
+                          style={{ padding: '3px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: calcMode === m.key ? '#6366f1' : '#1e1e2e', color: calcMode === m.key ? '#fff' : '#6b7280' }}>
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={() => setShowModeInfo((v) => !v)}
+                      style={{ fontSize: 9, color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', flexShrink: 0 }}>
+                      {showModeInfo ? '설명 닫기' : '기준 설명 보기'}
+                    </button>
+                  </div>
+                  {showModeInfo && (
+                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {CALC_MODES.map((m) => (
+                        <div key={m.key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                          <span style={{ fontSize: 9, fontWeight: 700, color: calcMode === m.key ? '#a5b4fc' : '#4b5563', flexShrink: 0, width: 30 }}>{m.label}</span>
+                          <span style={{ fontSize: 9, color: '#6b7280', lineHeight: 1.5 }}>{m.desc}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* 핵심 지표 3개 */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
                   {[
-                    { label: '승률', value: `${perfData.win_rate.toFixed(1)}%`, sub: `${perfData.win_count}승 ${perfData.lose_count}패`, color: perfData.win_rate >= 50 ? '#16a34a' : '#dc2626' },
-                    { label: '누적 수익률', value: pctStr(perfData.cumulative_return_pct), sub: `평균 ${pctStr(perfData.avg_return_pct)}`, color: pctColor(perfData.cumulative_return_pct) },
-                    { label: '거래 횟수', value: `${perfData.total_trades}건`, sub: `최고 ${pctStr(perfData.max_return_pct)} / 최저 ${pctStr(perfData.max_loss_pct)}`, color: '#a5b4fc' },
+                    {
+                      label: '승률',
+                      value: `${perfData.win_rate.toFixed(1)}%`,
+                      sub: `${perfData.win_count}승 ${perfData.lose_count}패`,
+                      color: perfData.win_rate >= 50 ? '#16a34a' : '#dc2626',
+                    },
+                    {
+                      label: `수익률 (${currentModeInfo.label})`,
+                      value: pctStr(displayCumulative),
+                      sub: `완료 거래 ${completedReturns.length}건 기준`,
+                      color: pctColor(displayCumulative),
+                    },
+                    {
+                      label: '거래 횟수',
+                      value: `${perfData.total_trades}건`,
+                      sub: `최고 ${pctStr(perfData.max_return_pct)} / 최저 ${pctStr(perfData.max_loss_pct)}`,
+                      color: '#a5b4fc',
+                    },
                   ].map((item) => (
                     <div key={item.label} style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '14px 16px', textAlign: 'center' }}>
                       <div style={{ fontSize: 10, color: '#4b5563', marginBottom: 6 }}>{item.label}</div>
@@ -256,6 +335,9 @@ const PerformancePage: React.FC = () => {
                   style={{ padding: '8px 20px', fontSize: 11, borderRadius: 6, border: 'none', cursor: principalNum > 0 ? 'pointer' : 'default', background: principalNum > 0 ? '#6366f1' : '#374151', color: '#fff', fontWeight: 600, flexShrink: 0 }}>
                   시뮬레이션 실행
                 </button>
+              </div>
+              <div style={{ marginTop: 10, fontSize: 9, color: '#374151', lineHeight: 1.6 }}>
+                투자금을 동시 보유 종목 수로 균등 분배하여 AI 매수 신호마다 진입, 매도 신호에 청산하는 방식으로 계산합니다. 동시 보유 한도 초과 시 신규 매수는 건너뜁니다.
               </div>
             </div>
 
