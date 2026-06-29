@@ -26,14 +26,12 @@ const PerformancePage: React.FC = () => {
   const navigate = useNavigate();
   const { models, selectedModel, setSelectedModel } = useModel();
 
-  // 실적 탭
   const [perfData, setPerfData] = useState<PerformanceResponse | null>(null);
   const [perfLoading, setPerfLoading] = useState(false);
   const [period, setPeriod] = useState<string>('3m');
   const [perfYear, setPerfYear] = useState<number | undefined>(undefined);
   const [activeTab, setActiveTab] = useState<'holdings' | 'trades'>('holdings');
 
-  // 시뮬레이션 탭
   const [simData, setSimData] = useState<SimulationResponse | null>(null);
   const [simLoading, setSimLoading] = useState(false);
   const [principal, setPrincipal] = useState('10000000');
@@ -63,7 +61,6 @@ const PerformancePage: React.FC = () => {
   }, [selectedModel, period, perfYear]);
 
   const completedTrades = perfData?.trades.filter((t) => t.return_pct != null) ?? [];
-
   const principalNum = parseFloat(principal.replace(/,/g, '')) || 0;
 
   return (
@@ -84,7 +81,6 @@ const PerformancePage: React.FC = () => {
             </button>
           ))}
         </div>
-        {/* 메인 탭 */}
         <div style={{ display: 'flex', gap: 0, marginLeft: 8, background: '#1e1e2e', borderRadius: 6, overflow: 'hidden' }}>
           {[['perf', 'AI 실적'], ['sim', '시뮬레이션']].map(([key, label]) => (
             <button key={key} onClick={() => setMainTab(key as 'perf' | 'sim')}
@@ -100,7 +96,7 @@ const PerformancePage: React.FC = () => {
         {/* AI 실적 탭 */}
         {mainTab === 'perf' && (
           <>
-            {/* 기간 필터 */}
+            {/* 기간/연도 필터 */}
             <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
               <span style={{ fontSize: 10, color: '#4b5563' }}>기간</span>
               {PERIODS.map((p) => (
@@ -111,7 +107,7 @@ const PerformancePage: React.FC = () => {
               ))}
               <span style={{ fontSize: 10, color: '#4b5563', marginLeft: 8 }}>연도</span>
               {YEARS.map((y) => (
-                <button key={y} onClick={() => { setPerfYear(y); }}
+                <button key={y} onClick={() => setPerfYear(y)}
                   style={{ padding: '3px 8px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: perfYear === y ? '#6366f1' : '#1e1e2e', color: perfYear === y ? '#fff' : '#555' }}>
                   {y}
                 </button>
@@ -124,12 +120,12 @@ const PerformancePage: React.FC = () => {
               <div style={{ textAlign: 'center', padding: '60px 0', color: '#4b5563' }}>데이터 없음</div>
             ) : (
               <>
-                {/* 핵심 지표 */}
+                {/* 핵심 지표 3개 */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
                   {[
                     { label: '승률', value: `${perfData.win_rate.toFixed(1)}%`, sub: `${perfData.win_count}승 ${perfData.lose_count}패`, color: perfData.win_rate >= 50 ? '#16a34a' : '#dc2626' },
-                    { label: '평균 수익률', value: pctStr(perfData.avg_return_pct), sub: `최고 ${pctStr(perfData.max_return_pct)}`, color: pctColor(perfData.avg_return_pct) },
-                    { label: '거래 횟수', value: `${perfData.total_trades}건`, sub: `최저 ${pctStr(perfData.max_loss_pct)}`, color: '#a5b4fc' },
+                    { label: '누적 수익률', value: pctStr(perfData.cumulative_return_pct), sub: `평균 ${pctStr(perfData.avg_return_pct)}`, color: pctColor(perfData.cumulative_return_pct) },
+                    { label: '거래 횟수', value: `${perfData.total_trades}건`, sub: `최고 ${pctStr(perfData.max_return_pct)} / 최저 ${pctStr(perfData.max_loss_pct)}`, color: '#a5b4fc' },
                   ].map((item) => (
                     <div key={item.label} style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '14px 16px', textAlign: 'center' }}>
                       <div style={{ fontSize: 10, color: '#4b5563', marginBottom: 6 }}>{item.label}</div>
@@ -139,7 +135,7 @@ const PerformancePage: React.FC = () => {
                   ))}
                 </div>
 
-                {/* 탭 */}
+                {/* 탭: 보유종목 / 매매기록 */}
                 <div style={{ display: 'flex', borderBottom: '1px solid #1e1e2e', marginBottom: 12 }}>
                   {[['holdings', `현재 보유 (${perfData.holdings.length})`], ['trades', `매매 기록 (${completedTrades.length}건)`]].map(([key, label]) => (
                     <button key={key} onClick={() => setActiveTab(key as 'holdings' | 'trades')}
@@ -209,11 +205,9 @@ const PerformancePage: React.FC = () => {
         {/* 시뮬레이션 탭 */}
         {mainTab === 'sim' && (
           <>
-            {/* 파라미터 입력 */}
             <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '16px 20px', marginBottom: 14 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 12 }}>시뮬레이션 설정</div>
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                {/* 투자금 */}
                 <div>
                   <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>투자 원금</div>
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -231,7 +225,6 @@ const PerformancePage: React.FC = () => {
                     ))}
                   </div>
                 </div>
-                {/* 동시 보유 종목 수 */}
                 <div>
                   <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>동시 보유 종목 수</div>
                   <div style={{ display: 'flex', gap: 3 }}>
@@ -243,7 +236,6 @@ const PerformancePage: React.FC = () => {
                     ))}
                   </div>
                 </div>
-                {/* 연도 */}
                 <div>
                   <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>연도 (전체면 비움)</div>
                   <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
@@ -259,7 +251,6 @@ const PerformancePage: React.FC = () => {
                     ))}
                   </div>
                 </div>
-                {/* 실행 버튼 */}
                 <button onClick={() => fetchSim(selectedModel, principalNum, maxStocks, simYear)}
                   disabled={principalNum <= 0}
                   style={{ padding: '8px 20px', fontSize: 11, borderRadius: 6, border: 'none', cursor: principalNum > 0 ? 'pointer' : 'default', background: principalNum > 0 ? '#6366f1' : '#374151', color: '#fff', fontWeight: 600, flexShrink: 0 }}>
@@ -272,22 +263,20 @@ const PerformancePage: React.FC = () => {
               <div style={{ textAlign: 'center', padding: '60px 0', color: '#4b5563' }}>계산 중...</div>
             ) : simData ? (
               <>
-                {/* 총 결과 */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
                   {[
-                    { label: '원금', value: `${fmtKRW(simData.principal)}원`, color: '#9ca3af' },
-                    { label: '총 수익', value: `${simData.total_profit >= 0 ? '+' : ''}${fmtKRW(simData.total_profit)}원`, color: pctColor(simData.total_profit) },
-                    { label: '최종 금액', value: `${fmtKRW(simData.total_final_amount)}원`, color: pctColor(simData.total_return_pct) },
+                    { label: '원금', value: `${fmtKRW(simData.principal)}원`, color: '#9ca3af', sub: '' },
+                    { label: '총 수익', value: `${simData.total_profit >= 0 ? '+' : ''}${fmtKRW(simData.total_profit)}원`, color: pctColor(simData.total_profit), sub: pctStr(simData.total_return_pct) },
+                    { label: '최종 금액', value: `${fmtKRW(simData.total_final_amount)}원`, color: pctColor(simData.total_return_pct), sub: '' },
                   ].map((item) => (
                     <div key={item.label} style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '14px 16px', textAlign: 'center' }}>
                       <div style={{ fontSize: 10, color: '#4b5563', marginBottom: 6 }}>{item.label}</div>
                       <div style={{ fontSize: 20, fontWeight: 700, color: item.color }}>{item.value}</div>
-                      {item.label === '총 수익' && <div style={{ fontSize: 10, color: pctColor(simData.total_return_pct), marginTop: 4 }}>{pctStr(simData.total_return_pct)}</div>}
+                      {item.sub && <div style={{ fontSize: 10, color: item.color, marginTop: 4 }}>{item.sub}</div>}
                     </div>
                   ))}
                 </div>
 
-                {/* 연도별 결과 테이블 */}
                 <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, overflow: 'hidden' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 1fr 1fr 1fr 1fr', padding: '10px 16px', borderBottom: '1px solid #1e1e2e', fontSize: 9, color: '#4b5563', fontWeight: 600 }}>
                     <span>연도</span>
