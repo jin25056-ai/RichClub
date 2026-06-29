@@ -33,8 +33,9 @@ node_modules/
 .vscode
 Thumbs.db
 
-# pkl (AI 모델)
+# pkl (AI 모델) - web_server/app/models 는 예외
 *.pkl
+!web_server/app/models/**/*.pkl
 
 # dataset
 dataset_final.csv
@@ -66,7 +67,7 @@ env/
 
 # os
 .DS_Store
-Thumbs.dbm
+Thumbbs.db
 
 # rawdata (수집 데이터 - 용량 큼)
 rawdata/
