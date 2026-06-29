@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -20,17 +21,46 @@ async def collect_market_data() -> None:
 
 
 async def run_daily_predict() -> None:
-    """매일 장 마감 후 전 종목 예측 (KST 15:35 = UTC 06:35)"""
+    """매일 장 마감 후 전 종목 예측 - 데이터 없으면 10분마다 재시도"""
+    import yfinance as yf
     db = get_db()
     from app.ml.predictor import run_daily_prediction
-    await run_daily_prediction(db)
+
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
+    from datetime import timedelta
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime('%Y-%m-%d')
+
+    while True:
+        raw = yf.download('005930.KS', start=today, end=tomorrow,
+                          interval='1d', progress=False, auto_adjust=True)
+        if not raw.empty:
+            logger.info(f"[predictor] {today} 데이터 확인됨, 예측 시작")
+            await run_daily_prediction(db, target_date=today)
+            break
+        logger.info(f"[predictor] {today} 데이터 아직 없음, 10분 후 재시도")
+        await asyncio.sleep(600)
 
 
 async def run_daily_seo_predict() -> None:
-    """매일 장 마감 후 seo-model-v1 예측 (KST 15:40 = UTC 06:40)"""
+    """매일 장 마감 후 seo-model-v1 예측 - 데이터 없으면 10분마다 재시도"""
+    import yfinance as yf
+    from datetime import timedelta
     db = get_db()
     from app.ml.seo_predictor import run_daily_seo_prediction
-    await run_daily_seo_prediction(db)
+
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime('%Y-%m-%d')
+
+    while True:
+        raw = yf.download('005930.KS', start=today, end=tomorrow,
+                          interval='1d', progress=False, auto_adjust=True)
+        if not raw.empty:
+            logger.info(f"[seo_predictor] {today} 데이터 확인됨, 예측 시작")
+            await run_daily_seo_prediction(db, target_date=today)
+            break
+        logger.info(f"[seo_predictor] {today} 데이터 아직 없음, 10분 후 재시도")
+        await asyncio.sleep(600)
 
 
 async def run_evaluate() -> None:
@@ -76,39 +106,34 @@ async def run_auto_retrain_if_needed() -> None:
 
 
 def start_scheduler() -> None:
-    # 글로벌 시장 (UTC 00:00, 06:00)
     scheduler.add_job(collect_market_data, trigger="cron",
                       hour="0,6", minute="0", id="collect_market_data", replace_existing=True)
 
-    # 5분봉 수집 (월~금)
     scheduler.add_job(run_5min_candle_collection, trigger="cron",
                       day_of_week="mon-fri", minute="*/5",
                       id="collect_5min_candles", replace_existing=True,
                       misfire_grace_time=240)
 
-    # ju-model 일별 예측 (KST 15:35 = UTC 06:35)
+    # ju-model 일별 예측 (KST 15:35 = UTC 06:35) - 데이터 없으면 10분마다 재시도
     scheduler.add_job(run_daily_predict, trigger="cron",
                       day_of_week="mon-fri", hour="6", minute="35",
                       id="daily_predict", replace_existing=True,
                       misfire_grace_time=3600)
 
-    # seo-model-v1 일별 예측 (KST 15:40 = UTC 06:40)
+    # seo-model-v1 일별 예측 (KST 15:40 = UTC 06:40) - 데이터 없으면 10분마다 재시도
     scheduler.add_job(run_daily_seo_predict, trigger="cron",
                       day_of_week="mon-fri", hour="6", minute="40",
                       id="daily_seo_predict", replace_existing=True,
                       misfire_grace_time=3600)
 
-    # 예측 성능 평가 (UTC 07:00)
     scheduler.add_job(run_evaluate, trigger="cron",
                       hour="7", minute="0",
                       id="evaluate_predictions", replace_existing=True)
 
-    # 주간 재학습 (일요일 UTC 23:00)
     scheduler.add_job(run_retrain, trigger="cron",
                       day_of_week="sun", hour="23", minute="0",
                       id="weekly_retrain", replace_existing=True)
 
-    # 자동 재학습 체크 (수요일 UTC 09:00)
     scheduler.add_job(run_auto_retrain_if_needed, trigger="cron",
                       day_of_week="wed", hour="9", minute="0",
                       id="auto_retrain_check", replace_existing=True)
