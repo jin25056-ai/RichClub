@@ -82,9 +82,33 @@ class HoldingItem(BaseModel):
     unrealized_pct: float
 
 
+class SimYearResult(BaseModel):
+    year: int
+    total_trades: int
+    win_count: int
+    lose_count: int
+    win_rate: float
+    avg_return_pct: float
+    final_amount: float
+    profit: float
+    return_pct: float
+
+
+class SimulationResponse(BaseModel):
+    model_id: str
+    principal: float
+    max_stocks: int
+    years: List[SimYearResult]
+    total_final_amount: float
+    total_profit: float
+    total_return_pct: float
+    updated_at: datetime
+
+
 class PerformanceResponse(BaseModel):
     model_id: str
     period: str
+    year: Optional[int] = None
     win_rate: float
     cumulative_return_pct: float
     total_trades: int
@@ -377,31 +401,16 @@ async def _load_ichimoku_map(db, stock_codes: list, since: datetime) -> dict:
     return ichimoku_map
 
 
-@router.get("/performance/{model_id}", response_model=PerformanceResponse, summary="AI 모델 실적")
-async def get_model_performance(
-    model_id: str,
-    period: str = Query("3m"),
-    db: AsyncIOMotorDatabase = Depends(_db),
-    _: dict = Depends(get_current_user),
-):
-    """AI 모델 전 종목 실적 - ichimoku 없이 MA60만으로 침체 판단 (속도 최적화)"""
-    if period not in PERIOD_DAYS_MAP:
-        raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
-
-    since = datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS_MAP[period])
-    until = datetime.now(timezone.utc) + timedelta(days=1)
-
-    query: dict = {
+async def _get_trades_for_period(db, model_id: str, since: datetime, until: datetime) -> list:
+    """기간 내 전 종목 매매 기록 추출 (MA60 침체 제외)"""
+    query = {
         "model_id": model_id,
         "predicted_at": {"$gte": since, "$lt": until},
     }
-
     docs = [doc async for doc in db.total_trading_signals.find(
         query,
         projection={"stock_code": 1, "stock_name": 1, "signal": 1, "predicted_at": 1, "close": 1, "ma60": 1}
     ).sort("predicted_at", 1)]
-    if not docs:
-        raise HTTPException(status_code=404, detail="해당 모델의 데이터가 없습니다.")
 
     sc_docs: dict = defaultdict(list)
     sc_name: dict = {}
@@ -412,9 +421,8 @@ async def get_model_performance(
             if sc not in sc_name:
                 sc_name[sc] = doc.get("stock_name", sc)
 
-    all_trades: list = []
-    realized_returns: list = []
-    holdings: list = []
+    all_trades = []
+    holdings = []
 
     for sc, sdocs in sc_docs.items():
         position = None
@@ -432,7 +440,6 @@ async def get_model_performance(
             close = float(close)
             latest_price = close
             date_str = dt.strftime("%Y-%m-%d")
-
             stagnant = _ma60_falling(ma60, prev_ma60)
 
             if signal == "매수" and position is None and not stagnant:
@@ -444,7 +451,6 @@ async def get_model_performance(
                     buy_date=position["buy_date"], buy_price=position["buy_price"],
                     sell_date=date_str, sell_price=close, return_pct=ret_pct,
                 ))
-                realized_returns.append(ret_pct)
                 position = None
 
             if ma60 is not None:
@@ -463,6 +469,33 @@ async def get_model_performance(
                 sell_date=None, sell_price=latest_price, unrealized_pct=unrealized_pct,
             ))
 
+    return all_trades, holdings
+
+
+@router.get("/performance/{model_id}", response_model=PerformanceResponse, summary="AI 모델 실적")
+async def get_model_performance(
+    model_id: str,
+    period: str = Query("3m"),
+    year: Optional[int] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """AI 모델 전 종목 실적"""
+    if year:
+        since = datetime(year, 1, 1, tzinfo=timezone.utc)
+        until = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    elif period in PERIOD_DAYS_MAP:
+        since = datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS_MAP[period])
+        until = datetime.now(timezone.utc) + timedelta(days=1)
+    else:
+        raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
+
+    all_trades, holdings = await _get_trades_for_period(db, model_id, since, until)
+
+    if not all_trades and not holdings:
+        raise HTTPException(status_code=404, detail="해당 모델의 데이터가 없습니다.")
+
+    realized_returns = [t.return_pct for t in all_trades if t.return_pct is not None]
     win = [r for r in realized_returns if r > 0]
     lose = [r for r in realized_returns if r <= 0]
     total = len(realized_returns)
@@ -479,6 +512,7 @@ async def get_model_performance(
     return PerformanceResponse(
         model_id=model_id,
         period=period,
+        year=year,
         win_rate=round(len(win) / total * 100, 1) if total > 0 else 0,
         cumulative_return_pct=round((cumulative - 1) * 100, 2),
         total_trades=total,
@@ -489,6 +523,135 @@ async def get_model_performance(
         max_loss_pct=round(min(realized_returns), 2) if realized_returns else 0,
         holdings=holdings,
         trades=all_trades,
+        updated_at=datetime.now(timezone.utc),
+    )
+
+
+@router.get("/simulation/{model_id}", response_model=SimulationResponse, summary="AI 모델 포트폴리오 시뮬레이션")
+async def get_simulation(
+    model_id: str,
+    principal: float = Query(10000000, description="투자 원금"),
+    max_stocks: int = Query(10, ge=1, le=50, description="동시 보유 최대 종목 수"),
+    year: Optional[int] = Query(None, description="특정 연도 (없으면 전체)"),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """
+    포트폴리오 시뮬레이션
+    - 투자금을 max_stocks로 균등 분배
+    - 매수 시그널마다 종목당 투자금으로 진입
+    - 매도 시그널에 청산, 손익 반영
+    - 동시 보유 max_stocks 초과 시 신규 매수 스킵
+    """
+    years_to_sim = [year] if year else list(range(2021, datetime.now().year + 1))
+    per_stock = principal / max_stocks
+
+    year_results: list = []
+    running_amount = principal
+
+    for y in years_to_sim:
+        since = datetime(y, 1, 1, tzinfo=timezone.utc)
+        until = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
+
+        query = {
+            "model_id": model_id,
+            "predicted_at": {"$gte": since, "$lt": until},
+        }
+        docs = [doc async for doc in db.total_trading_signals.find(
+            query,
+            projection={"stock_code": 1, "stock_name": 1, "signal": 1, "predicted_at": 1, "close": 1, "ma60": 1}
+        ).sort("predicted_at", 1)]
+
+        if not docs:
+            continue
+
+        # 종목별로 그룹화
+        sc_docs: dict = defaultdict(list)
+        for doc in docs:
+            sc = doc.get("stock_code", "")
+            if sc:
+                sc_docs[sc].append(doc)
+
+        # 날짜별 이벤트 수집 (매수/매도)
+        events: list = []
+        for sc, sdocs in sc_docs.items():
+            position = None
+            prev_ma60 = None
+            for doc in sdocs:
+                signal = doc.get("signal", "관망")
+                dt = _to_date(doc.get("predicted_at"))
+                close = doc.get("close")
+                ma60 = doc.get("ma60")
+                if close is None or float(close) <= 0:
+                    continue
+                close = float(close)
+                date_str = dt.strftime("%Y-%m-%d")
+                stagnant = _ma60_falling(ma60, prev_ma60)
+
+                if signal == "매수" and position is None and not stagnant:
+                    position = {"buy_date": date_str, "buy_price": close, "sc": sc}
+                    events.append({"date": date_str, "type": "buy", "sc": sc, "price": close})
+                elif signal == "매도" and position is not None:
+                    events.append({"date": date_str, "type": "sell", "sc": sc,
+                                   "buy_price": position["buy_price"], "sell_price": close})
+                    position = None
+
+                if ma60 is not None:
+                    prev_ma60 = float(ma60)
+
+        # 날짜순 정렬 후 시뮬레이션
+        events.sort(key=lambda e: e["date"])
+        holdings_map: dict = {}  # sc -> 투자금
+        year_profit = 0.0
+        win_count = 0
+        lose_count = 0
+        returns: list = []
+
+        for ev in events:
+            sc = ev["sc"]
+            if ev["type"] == "buy":
+                if sc not in holdings_map and len(holdings_map) < max_stocks:
+                    holdings_map[sc] = per_stock
+            elif ev["type"] == "sell":
+                if sc in holdings_map:
+                    invested = holdings_map.pop(sc)
+                    ret_pct = (ev["sell_price"] - ev["buy_price"]) / ev["buy_price"]
+                    profit = invested * ret_pct
+                    year_profit += profit
+                    returns.append(ret_pct * 100)
+                    if profit > 0:
+                        win_count += 1
+                    else:
+                        lose_count += 1
+
+        total_trades = win_count + lose_count
+        final = running_amount + year_profit
+        ret_pct_year = round((year_profit / running_amount) * 100, 2) if running_amount > 0 else 0
+
+        year_results.append(SimYearResult(
+            year=y,
+            total_trades=total_trades,
+            win_count=win_count,
+            lose_count=lose_count,
+            win_rate=round(win_count / total_trades * 100, 1) if total_trades > 0 else 0,
+            avg_return_pct=round(sum(returns) / len(returns), 2) if returns else 0,
+            final_amount=round(final, 0),
+            profit=round(year_profit, 0),
+            return_pct=ret_pct_year,
+        ))
+        running_amount = final
+
+    total_profit = running_amount - principal
+    total_return_pct = round((total_profit / principal) * 100, 2) if principal > 0 else 0
+
+    return SimulationResponse(
+        model_id=model_id,
+        principal=principal,
+        max_stocks=max_stocks,
+        years=year_results,
+        total_final_amount=round(running_amount, 0),
+        total_profit=round(total_profit, 0),
+        total_return_pct=total_return_pct,
         updated_at=datetime.now(timezone.utc),
     )
 

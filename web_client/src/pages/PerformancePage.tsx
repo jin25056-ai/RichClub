@@ -1,229 +1,321 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { marketApi, PerformanceResponse, HoldingItem, TradeRecord } from '../api/stock';
+import { marketApi, PerformanceResponse, SimulationResponse, SimYearResult, HoldingItem, TradeRecord } from '../api/stock';
 import { useModel } from '../contexts/ModelContext';
 
 const pctColor = (v: number) => v >= 0 ? '#16a34a' : '#dc2626';
 const pctStr = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 const fmtKRW = (n: number) => {
-  if (Math.abs(n) >= 100000000) return `${(n / 100000000).toFixed(1)}억`;
-  if (Math.abs(n) >= 10000) return `${(n / 10000).toFixed(0)}만`;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  if (abs >= 100000000) return `${sign}${(abs / 100000000).toFixed(1)}억`;
+  if (abs >= 10000) return `${sign}${(abs / 10000).toFixed(0)}만`;
   return n.toLocaleString();
 };
 const fmtPrice = (n: number) =>
   n >= 1000000 ? `${(n / 1000000).toFixed(1)}M`
   : n >= 1000 ? `${Math.round(n / 1000)}K`
-  : String(n);
+  : String(Math.round(n));
 
 const PERIODS = ['1m', '3m', '6m', 'all'] as const;
+const CURRENT_YEAR = new Date().getFullYear();
+const YEARS = Array.from({ length: CURRENT_YEAR - 2020 }, (_, i) => CURRENT_YEAR - i);
+const MAX_STOCK_OPTIONS = [5, 10, 20, 30, 50];
 
 const PerformancePage: React.FC = () => {
   const navigate = useNavigate();
   const { models, selectedModel, setSelectedModel } = useModel();
-  const [data, setData] = useState<PerformanceResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+
+  // 실적 탭
+  const [perfData, setPerfData] = useState<PerformanceResponse | null>(null);
+  const [perfLoading, setPerfLoading] = useState(false);
   const [period, setPeriod] = useState<string>('3m');
-  const [inputAmt, setInputAmt] = useState('10000000');
+  const [perfYear, setPerfYear] = useState<number | undefined>(undefined);
   const [activeTab, setActiveTab] = useState<'holdings' | 'trades'>('holdings');
 
-  const fetchData = (modelId: string, p: string) => {
-    setLoading(true);
-    marketApi.getPerformance(modelId, p)
-      .then((res) => setData(res.data))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
+  // 시뮬레이션 탭
+  const [simData, setSimData] = useState<SimulationResponse | null>(null);
+  const [simLoading, setSimLoading] = useState(false);
+  const [principal, setPrincipal] = useState('10000000');
+  const [maxStocks, setMaxStocks] = useState(10);
+  const [simYear, setSimYear] = useState<number | undefined>(undefined);
+  const [mainTab, setMainTab] = useState<'perf' | 'sim'>('perf');
+
+  const fetchPerf = (modelId: string, p: string, y?: number) => {
+    setPerfLoading(true);
+    marketApi.getPerformance(modelId, p, y)
+      .then((res) => setPerfData(res.data))
+      .catch(() => setPerfData(null))
+      .finally(() => setPerfLoading(false));
+  };
+
+  const fetchSim = (modelId: string, prin: number, ms: number, y?: number) => {
+    setSimLoading(true);
+    marketApi.getSimulation(modelId, prin, ms, y)
+      .then((res) => setSimData(res.data))
+      .catch(() => setSimData(null))
+      .finally(() => setSimLoading(false));
   };
 
   useEffect(() => {
     if (!localStorage.getItem('access_token')) { navigate('/auth'); return; }
-    fetchData(selectedModel, period);
-  }, [selectedModel, period]);
+    fetchPerf(selectedModel, period, perfYear);
+  }, [selectedModel, period, perfYear]);
 
-  const principal = parseFloat(inputAmt.replace(/,/g, '')) || 0;
-  const finalAmt = data && principal > 0 ? principal * (1 + data.cumulative_return_pct / 100) : null;
-  const profit = finalAmt != null ? finalAmt - principal : null;
-  const completedTrades = data?.trades.filter((t) => t.return_pct != null) ?? [];
+  const completedTrades = perfData?.trades.filter((t) => t.return_pct != null) ?? [];
+
+  const principalNum = parseFloat(principal.replace(/,/g, '')) || 0;
 
   return (
     <div style={{ background: '#0a0a14', minHeight: '100vh', fontFamily: 'inherit', color: '#e2e8f0' }}>
       {/* 헤더 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px', borderBottom: '1px solid #1e1e2e' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', borderBottom: '1px solid #1e1e2e', flexWrap: 'wrap' }}>
         <button onClick={() => navigate(-1)}
-          style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 18, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>
+          style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>
           &#8592;
         </button>
         <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>AI 실적</span>
-        <div style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
+        <div style={{ display: 'flex', gap: 4 }}>
           {models.map((m) => (
             <button key={m.id} onClick={() => { if (m.available) setSelectedModel(m.id); }}
               disabled={!m.available}
-              style={{
-                padding: '3px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: m.available ? 'pointer' : 'default',
-                background: selectedModel === m.id ? '#6366f1' : '#1e1e2e',
-                color: selectedModel === m.id ? '#fff' : m.available ? '#9ca3af' : '#374151',
-              }}>
+              style={{ padding: '3px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: m.available ? 'pointer' : 'default', background: selectedModel === m.id ? '#6366f1' : '#1e1e2e', color: selectedModel === m.id ? '#fff' : m.available ? '#9ca3af' : '#374151' }}>
               {m.name}
             </button>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
-          {PERIODS.map((p) => (
-            <button key={p} onClick={() => setPeriod(p)}
-              style={{ padding: '3px 8px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: period === p ? '#6366f1' : '#1e1e2e', color: period === p ? '#fff' : '#555' }}>
-              {p}
+        {/* 메인 탭 */}
+        <div style={{ display: 'flex', gap: 0, marginLeft: 8, background: '#1e1e2e', borderRadius: 6, overflow: 'hidden' }}>
+          {[['perf', 'AI 실적'], ['sim', '시뮬레이션']].map(([key, label]) => (
+            <button key={key} onClick={() => setMainTab(key as 'perf' | 'sim')}
+              style={{ padding: '4px 12px', fontSize: 10, border: 'none', cursor: 'pointer', background: mainTab === key ? '#6366f1' : 'transparent', color: mainTab === key ? '#fff' : '#6b7280' }}>
+              {label}
             </button>
           ))}
         </div>
       </div>
 
       <div style={{ padding: '16px 20px', maxWidth: 1000, margin: '0 auto' }}>
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '60px 0', color: '#4b5563' }}>불러오는 중...</div>
-        ) : !data ? (
-          <div style={{ textAlign: 'center', padding: '60px 0', color: '#4b5563' }}>데이터 없음</div>
-        ) : (
+
+        {/* AI 실적 탭 */}
+        {mainTab === 'perf' && (
           <>
-            {/* 핵심 지표 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
-              <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '16px 20px', textAlign: 'center' }}>
-                <div style={{ fontSize: 11, color: '#4b5563', marginBottom: 6 }}>승률</div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: data.win_rate >= 50 ? '#16a34a' : '#dc2626' }}>
-                  {data.win_rate.toFixed(1)}%
-                </div>
-                <div style={{ fontSize: 10, color: '#374151', marginTop: 4 }}>{data.win_count}승 {data.lose_count}패</div>
-              </div>
-              <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '16px 20px', textAlign: 'center' }}>
-                <div style={{ fontSize: 11, color: '#4b5563', marginBottom: 6 }}>누적 수익률</div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: pctColor(data.cumulative_return_pct) }}>
-                  {pctStr(data.cumulative_return_pct)}
-                </div>
-                <div style={{ fontSize: 10, color: '#374151', marginTop: 4 }}>평균 {pctStr(data.avg_return_pct)}</div>
-              </div>
-              <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '16px 20px', textAlign: 'center' }}>
-                <div style={{ fontSize: 11, color: '#4b5563', marginBottom: 6 }}>거래 횟수</div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: '#a5b4fc' }}>{data.total_trades}건</div>
-                <div style={{ fontSize: 10, color: '#374151', marginTop: 4 }}>
-                  최고 {pctStr(data.max_return_pct)} / 최저 {pctStr(data.max_loss_pct)}
-                </div>
-              </div>
-            </div>
-
-            {/* 투자금 시뮬레이션 */}
-            <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '16px 20px', marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 12 }}>투자금 시뮬레이션</div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                <input value={inputAmt}
-                  onChange={(e) => setInputAmt(e.target.value.replace(/[^0-9]/g, ''))}
-                  style={{ flex: 1, background: '#1e1e2e', border: '1px solid #2d2d3d', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: '#e2e8f0', outline: 'none' }}
-                  placeholder="투자금 입력" />
-                <span style={{ fontSize: 11, color: '#555' }}>원</span>
-                {[['100만', 1000000], ['500만', 5000000], ['1000만', 10000000], ['5000만', 50000000]].map(([label, val]) => (
-                  <button key={label as string} onClick={() => setInputAmt(String(val))}
-                    style={{ fontSize: 10, padding: '4px 8px', borderRadius: 4, border: 'none', cursor: 'pointer', background: '#1e1e2e', color: '#888', flexShrink: 0 }}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {principal > 0 && finalAmt != null && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#0d0d1a', borderRadius: 8, border: `1px solid ${pctColor(data.cumulative_return_pct)}33` }}>
-                  <div>
-                    <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>{fmtKRW(principal)}원 투자 시</div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: pctColor(profit ?? 0) }}>
-                      {profit != null ? `${profit >= 0 ? '+' : ''}${fmtKRW(Math.round(profit))}원` : '-'}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>최종금액</div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: pctColor(data.cumulative_return_pct) }}>
-                      {fmtKRW(Math.round(finalAmt))}원
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 탭: 보유종목 / 매매기록 */}
-            <div style={{ display: 'flex', gap: 0, marginBottom: 12, borderBottom: '1px solid #1e1e2e' }}>
-              {[['holdings', `현재 보유 종목 (${data.holdings.length})`], ['trades', `매매 기록 (${completedTrades.length}건)`]].map(([key, label]) => (
-                <button key={key} onClick={() => setActiveTab(key as 'holdings' | 'trades')}
-                  style={{
-                    padding: '8px 16px', fontSize: 11, border: 'none', cursor: 'pointer',
-                    background: 'transparent',
-                    color: activeTab === key ? '#a5b4fc' : '#555',
-                    fontWeight: activeTab === key ? 600 : 400,
-                    borderBottom: activeTab === key ? '2px solid #6366f1' : '2px solid transparent',
-                  }}>
-                  {label}
+            {/* 기간 필터 */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: 10, color: '#4b5563' }}>기간</span>
+              {PERIODS.map((p) => (
+                <button key={p} onClick={() => { setPeriod(p); setPerfYear(undefined); }}
+                  style={{ padding: '3px 8px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: period === p && !perfYear ? '#6366f1' : '#1e1e2e', color: period === p && !perfYear ? '#fff' : '#555' }}>
+                  {p}
+                </button>
+              ))}
+              <span style={{ fontSize: 10, color: '#4b5563', marginLeft: 8 }}>연도</span>
+              {YEARS.map((y) => (
+                <button key={y} onClick={() => { setPerfYear(y); }}
+                  style={{ padding: '3px 8px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: perfYear === y ? '#6366f1' : '#1e1e2e', color: perfYear === y ? '#fff' : '#555' }}>
+                  {y}
                 </button>
               ))}
             </div>
 
-            {/* 보유 종목 */}
-            {activeTab === 'holdings' && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
-                {data.holdings.length === 0 ? (
-                  <div style={{ color: '#4b5563', fontSize: 12, padding: '20px 0' }}>현재 보유 종목 없음</div>
-                ) : data.holdings.map((h: HoldingItem) => (
-                  <div key={h.stock_code}
-                    onClick={() => navigate(`/?code=${h.stock_code}`)}
-                    style={{
-                      background: '#0f0f1a', border: `1px solid ${pctColor(h.unrealized_pct)}22`,
-                      borderRadius: 8, padding: '12px 14px', cursor: 'pointer',
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = '#1a1a30')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = '#0f0f1a')}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#d1d5db', marginBottom: 2 }}>{h.stock_name}</div>
-                        <div style={{ fontSize: 9, color: '#4b5563' }}>{h.stock_code}</div>
-                      </div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: pctColor(h.unrealized_pct) }}>
-                        {pctStr(h.unrealized_pct)}
-                      </div>
+            {perfLoading ? (
+              <div style={{ textAlign: 'center', padding: '60px 0', color: '#4b5563' }}>불러오는 중...</div>
+            ) : !perfData ? (
+              <div style={{ textAlign: 'center', padding: '60px 0', color: '#4b5563' }}>데이터 없음</div>
+            ) : (
+              <>
+                {/* 핵심 지표 */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                  {[
+                    { label: '승률', value: `${perfData.win_rate.toFixed(1)}%`, sub: `${perfData.win_count}승 ${perfData.lose_count}패`, color: perfData.win_rate >= 50 ? '#16a34a' : '#dc2626' },
+                    { label: '평균 수익률', value: pctStr(perfData.avg_return_pct), sub: `최고 ${pctStr(perfData.max_return_pct)}`, color: pctColor(perfData.avg_return_pct) },
+                    { label: '거래 횟수', value: `${perfData.total_trades}건`, sub: `최저 ${pctStr(perfData.max_loss_pct)}`, color: '#a5b4fc' },
+                  ].map((item) => (
+                    <div key={item.label} style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '14px 16px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: '#4b5563', marginBottom: 6 }}>{item.label}</div>
+                      <div style={{ fontSize: 26, fontWeight: 700, color: item.color }}>{item.value}</div>
+                      <div style={{ fontSize: 9, color: '#374151', marginTop: 4 }}>{item.sub}</div>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#6b7280' }}>
-                      <span>매수 {h.buy_date} · {fmtPrice(h.buy_price)}</span>
-                      <span>현재 {fmtPrice(h.current_price)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
 
-            {/* 매매 기록 */}
-            {activeTab === 'trades' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {completedTrades.length === 0 ? (
-                  <div style={{ color: '#4b5563', fontSize: 12, padding: '20px 0' }}>매매 기록 없음</div>
-                ) : completedTrades.map((t: TradeRecord, i: number) => (
-                  <div key={i}
-                    onClick={() => { if (t.stock_code) navigate(`/?code=${t.stock_code}`); }}
-                    style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      padding: '10px 14px', borderRadius: 8, cursor: t.stock_code ? 'pointer' : 'default',
-                      background: (t.return_pct ?? 0) >= 0 ? '#14532d12' : '#7f1d1d12',
-                      border: `1px solid ${pctColor(t.return_pct ?? 0)}22`,
-                    }}
-                    onMouseEnter={(e) => { if (t.stock_code) e.currentTarget.style.opacity = '0.8'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
-                  >
-                    <div>
-                      <div style={{ fontSize: 12, color: '#d1d5db', fontWeight: 500, marginBottom: 4 }}>
-                        {t.stock_name}
-                        <span style={{ fontSize: 9, color: '#4b5563', marginLeft: 6 }}>{t.stock_code}</span>
+                {/* 탭 */}
+                <div style={{ display: 'flex', borderBottom: '1px solid #1e1e2e', marginBottom: 12 }}>
+                  {[['holdings', `현재 보유 (${perfData.holdings.length})`], ['trades', `매매 기록 (${completedTrades.length}건)`]].map(([key, label]) => (
+                    <button key={key} onClick={() => setActiveTab(key as 'holdings' | 'trades')}
+                      style={{ padding: '8px 16px', fontSize: 11, border: 'none', cursor: 'pointer', background: 'transparent', color: activeTab === key ? '#a5b4fc' : '#555', fontWeight: activeTab === key ? 600 : 400, borderBottom: activeTab === key ? '2px solid #6366f1' : '2px solid transparent' }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 보유 종목 */}
+                {activeTab === 'holdings' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 8 }}>
+                    {perfData.holdings.length === 0 ? (
+                      <div style={{ color: '#4b5563', fontSize: 12, padding: '20px 0' }}>현재 보유 종목 없음</div>
+                    ) : perfData.holdings.map((h: HoldingItem) => (
+                      <div key={h.stock_code} onClick={() => navigate(`/?code=${h.stock_code}`)}
+                        style={{ background: '#0f0f1a', border: `1px solid ${pctColor(h.unrealized_pct)}22`, borderRadius: 8, padding: '12px 14px', cursor: 'pointer' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = '#1a1a30')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = '#0f0f1a')}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: '#d1d5db' }}>{h.stock_name}</div>
+                            <div style={{ fontSize: 9, color: '#4b5563' }}>{h.stock_code}</div>
+                          </div>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: pctColor(h.unrealized_pct) }}>{pctStr(h.unrealized_pct)}</div>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#6b7280' }}>
+                          <span>매수 {h.buy_date} · {fmtPrice(h.buy_price)}</span>
+                          <span>현재 {fmtPrice(h.current_price)}</span>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 8, fontSize: 10, color: '#6b7280' }}>
-                        <span><span style={{ color: '#16a34a', fontWeight: 600 }}>B</span> {t.buy_date} · {fmtPrice(t.buy_price)}</span>
-                        <span style={{ color: '#374151' }}>→</span>
-                        <span><span style={{ color: '#dc2626', fontWeight: 600 }}>S</span> {t.sell_date} · {fmtPrice(t.sell_price ?? 0)}</span>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 16 }}>
-                      {pctStr(t.return_pct ?? 0)}
-                    </div>
+                    ))}
                   </div>
-                ))}
+                )}
+
+                {/* 매매 기록 */}
+                {activeTab === 'trades' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {completedTrades.map((t: TradeRecord, i: number) => (
+                      <div key={i} onClick={() => { if (t.stock_code) navigate(`/?code=${t.stock_code}`); }}
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderRadius: 8, cursor: t.stock_code ? 'pointer' : 'default', background: (t.return_pct ?? 0) >= 0 ? '#14532d12' : '#7f1d1d12', border: `1px solid ${pctColor(t.return_pct ?? 0)}22` }}
+                        onMouseEnter={(e) => { if (t.stock_code) e.currentTarget.style.opacity = '0.8'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}>
+                        <div>
+                          <div style={{ fontSize: 12, color: '#d1d5db', fontWeight: 500, marginBottom: 4 }}>
+                            {t.stock_name}
+                            <span style={{ fontSize: 9, color: '#4b5563', marginLeft: 6 }}>{t.stock_code}</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, fontSize: 10, color: '#6b7280' }}>
+                            <span><span style={{ color: '#16a34a', fontWeight: 600 }}>B</span> {t.buy_date} · {fmtPrice(t.buy_price)}</span>
+                            <span style={{ color: '#374151' }}>→</span>
+                            <span><span style={{ color: '#dc2626', fontWeight: 600 }}>S</span> {t.sell_date} · {fmtPrice(t.sell_price ?? 0)}</span>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 16 }}>
+                          {pctStr(t.return_pct ?? 0)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        {/* 시뮬레이션 탭 */}
+        {mainTab === 'sim' && (
+          <>
+            {/* 파라미터 입력 */}
+            <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '16px 20px', marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 12 }}>시뮬레이션 설정</div>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                {/* 투자금 */}
+                <div>
+                  <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>투자 원금</div>
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <input value={principal}
+                      onChange={(e) => setPrincipal(e.target.value.replace(/[^0-9]/g, ''))}
+                      style={{ width: 120, background: '#1e1e2e', border: '1px solid #2d2d3d', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: '#e2e8f0', outline: 'none' }} />
+                    <span style={{ fontSize: 10, color: '#555' }}>원</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 3, marginTop: 5 }}>
+                    {[[100, '100만'], [500, '500만'], [1000, '1000만'], [5000, '5000만']].map(([w, label]) => (
+                      <button key={w} onClick={() => setPrincipal(String(Number(w) * 10000))}
+                        style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, border: 'none', cursor: 'pointer', background: '#1e1e2e', color: '#888' }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* 동시 보유 종목 수 */}
+                <div>
+                  <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>동시 보유 종목 수</div>
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    {MAX_STOCK_OPTIONS.map((n) => (
+                      <button key={n} onClick={() => setMaxStocks(n)}
+                        style={{ padding: '5px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: maxStocks === n ? '#6366f1' : '#1e1e2e', color: maxStocks === n ? '#fff' : '#666' }}>
+                        {n}종목
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* 연도 */}
+                <div>
+                  <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>연도 (전체면 비움)</div>
+                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                    <button onClick={() => setSimYear(undefined)}
+                      style={{ padding: '5px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: !simYear ? '#6366f1' : '#1e1e2e', color: !simYear ? '#fff' : '#666' }}>
+                      전체
+                    </button>
+                    {YEARS.map((y) => (
+                      <button key={y} onClick={() => setSimYear(y)}
+                        style={{ padding: '5px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: simYear === y ? '#6366f1' : '#1e1e2e', color: simYear === y ? '#fff' : '#666' }}>
+                        {y}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* 실행 버튼 */}
+                <button onClick={() => fetchSim(selectedModel, principalNum, maxStocks, simYear)}
+                  disabled={principalNum <= 0}
+                  style={{ padding: '8px 20px', fontSize: 11, borderRadius: 6, border: 'none', cursor: principalNum > 0 ? 'pointer' : 'default', background: principalNum > 0 ? '#6366f1' : '#374151', color: '#fff', fontWeight: 600, flexShrink: 0 }}>
+                  시뮬레이션 실행
+                </button>
+              </div>
+            </div>
+
+            {simLoading ? (
+              <div style={{ textAlign: 'center', padding: '60px 0', color: '#4b5563' }}>계산 중...</div>
+            ) : simData ? (
+              <>
+                {/* 총 결과 */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                  {[
+                    { label: '원금', value: `${fmtKRW(simData.principal)}원`, color: '#9ca3af' },
+                    { label: '총 수익', value: `${simData.total_profit >= 0 ? '+' : ''}${fmtKRW(simData.total_profit)}원`, color: pctColor(simData.total_profit) },
+                    { label: '최종 금액', value: `${fmtKRW(simData.total_final_amount)}원`, color: pctColor(simData.total_return_pct) },
+                  ].map((item) => (
+                    <div key={item.label} style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '14px 16px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: '#4b5563', marginBottom: 6 }}>{item.label}</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: item.color }}>{item.value}</div>
+                      {item.label === '총 수익' && <div style={{ fontSize: 10, color: pctColor(simData.total_return_pct), marginTop: 4 }}>{pctStr(simData.total_return_pct)}</div>}
+                    </div>
+                  ))}
+                </div>
+
+                {/* 연도별 결과 테이블 */}
+                <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, overflow: 'hidden' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 1fr 1fr 1fr 1fr', padding: '10px 16px', borderBottom: '1px solid #1e1e2e', fontSize: 9, color: '#4b5563', fontWeight: 600 }}>
+                    <span>연도</span>
+                    <span style={{ textAlign: 'center' }}>거래</span>
+                    <span style={{ textAlign: 'center' }}>승률</span>
+                    <span style={{ textAlign: 'center' }}>평균수익</span>
+                    <span style={{ textAlign: 'center' }}>수익</span>
+                    <span style={{ textAlign: 'right' }}>잔액</span>
+                  </div>
+                  {simData.years.map((yr: SimYearResult) => (
+                    <div key={yr.year} style={{ display: 'grid', gridTemplateColumns: '60px 1fr 1fr 1fr 1fr 1fr', padding: '10px 16px', borderBottom: '1px solid #13131e', fontSize: 11 }}>
+                      <span style={{ color: '#a5b4fc', fontWeight: 600 }}>{yr.year}</span>
+                      <span style={{ textAlign: 'center', color: '#6b7280' }}>{yr.total_trades}건</span>
+                      <span style={{ textAlign: 'center', color: yr.win_rate >= 50 ? '#16a34a' : '#dc2626' }}>{yr.win_rate.toFixed(1)}%</span>
+                      <span style={{ textAlign: 'center', color: pctColor(yr.avg_return_pct) }}>{pctStr(yr.avg_return_pct)}</span>
+                      <span style={{ textAlign: 'center', color: pctColor(yr.profit) }}>{yr.profit >= 0 ? '+' : ''}{fmtKRW(yr.profit)}</span>
+                      <span style={{ textAlign: 'right', color: '#d1d5db', fontWeight: 500 }}>{fmtKRW(yr.final_amount)}원</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ marginTop: 8, fontSize: 9, color: '#374151', textAlign: 'right' }}>
+                  종목당 투자금 {fmtKRW(principalNum / maxStocks)}원 · 동시 최대 {simData.max_stocks}종목
+                </div>
+              </>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#374151', fontSize: 12 }}>
+                설정 후 시뮬레이션 실행 버튼을 눌러주세요
               </div>
             )}
           </>
