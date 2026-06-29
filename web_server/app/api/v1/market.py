@@ -499,9 +499,8 @@ async def get_model_performance(
     win = [r for r in realized_returns if r > 0]
     lose = [r for r in realized_returns if r <= 0]
     total = len(realized_returns)
-    cumulative = 1.0
-    for r in realized_returns:
-        cumulative *= (1 + r / 100)
+    # 단순 합산 (복리 계산 시 비현실적 수치 방지)
+    cumulative_pct = round(sum(realized_returns), 2) if realized_returns else 0.0
 
     all_trades.sort(key=lambda t: t.buy_date, reverse=True)
     holdings.sort(key=lambda h: h.unrealized_pct, reverse=True)
@@ -514,7 +513,7 @@ async def get_model_performance(
         period=period,
         year=year,
         win_rate=round(len(win) / total * 100, 1) if total > 0 else 0,
-        cumulative_return_pct=round((cumulative - 1) * 100, 2),
+        cumulative_return_pct=cumulative_pct,
         total_trades=total,
         win_count=len(win),
         lose_count=len(lose),
