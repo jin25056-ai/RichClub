@@ -153,7 +153,11 @@ async def run_full_seo_prediction(db: AsyncIOMotorDatabase, model_id: str = "seo
         for _, row in df.iterrows():
             try:
                 date_str = str(row["date"]).strip()
-                predicted_at = datetime.strptime(date_str, "%Y%m%d")
+                # YYYYMMDD 또는 YYYY-MM-DD 둘 다 처리
+                if "-" in date_str:
+                    predicted_at = datetime.strptime(date_str, "%Y-%m-%d")
+                else:
+                    predicted_at = datetime.strptime(date_str, "%Y%m%d")
             except Exception:
                 continue
 

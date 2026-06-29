@@ -8,6 +8,7 @@ pipeline {
         ENV_FILE = "/var/jenkins_home/.env"
         HOST_IP = "192.168.219.100"
         MODEL_VOLUME = "/Users/nadeko/models:/app/models"
+        CSV_VOLUME = "/Users/nadeko/collect_data:/app/collect_data"
     }
 
     stages {
@@ -48,6 +49,7 @@ pipeline {
                         --restart unless-stopped \\
                         -p ${APP_PORT}:8000 \\
                         -v ${MODEL_VOLUME} \\
+                        -v ${CSV_VOLUME} \\
                         --env-file ${ENV_FILE} \\
                         ${IMAGE_NAME}:latest
                 """
