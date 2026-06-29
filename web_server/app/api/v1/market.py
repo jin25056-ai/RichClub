@@ -384,7 +384,7 @@ async def get_model_performance(
     db: AsyncIOMotorDatabase = Depends(_db),
     _: dict = Depends(get_current_user),
 ):
-    """AI 모델 전 종목 실적 - 매수 시그널 기반 거래 집계"""
+    """AI 모델 전 종목 실적 - ichimoku 없이 MA60만으로 침체 판단 (속도 최적화)"""
     if period not in PERIOD_DAYS_MAP:
         raise HTTPException(status_code=400, detail="period는 1m / 3m / 6m / all 중 하나")
 
@@ -396,7 +396,10 @@ async def get_model_performance(
         "predicted_at": {"$gte": since, "$lt": until},
     }
 
-    docs = [doc async for doc in db.total_trading_signals.find(query).sort("predicted_at", 1)]
+    docs = [doc async for doc in db.total_trading_signals.find(
+        query,
+        projection={"stock_code": 1, "stock_name": 1, "signal": 1, "predicted_at": 1, "close": 1, "ma60": 1}
+    ).sort("predicted_at", 1)]
     if not docs:
         raise HTTPException(status_code=404, detail="해당 모델의 데이터가 없습니다.")
 
@@ -409,8 +412,6 @@ async def get_model_performance(
             if sc not in sc_name:
                 sc_name[sc] = doc.get("stock_name", sc)
 
-    ichimoku_map = await _load_ichimoku_map(db, list(sc_docs.keys()), since)
-
     all_trades: list = []
     realized_returns: list = []
     holdings: list = []
@@ -418,9 +419,7 @@ async def get_model_performance(
     for sc, sdocs in sc_docs.items():
         position = None
         latest_price = None
-        latest_date = None
         prev_ma60 = None
-        ichi = ichimoku_map.get(sc, {})
         name = sc_name.get(sc, sc)
 
         for doc in sdocs:
@@ -432,14 +431,12 @@ async def get_model_performance(
                 continue
             close = float(close)
             latest_price = close
-            latest_date = dt.strftime("%Y-%m-%d")
             date_str = dt.strftime("%Y-%m-%d")
 
-            span_a, span_b = ichi.get(date_str, (None, None))
-            stagnant = _is_ichimoku_stagnant(close, span_a, span_b) or _ma60_falling(ma60, prev_ma60)
+            stagnant = _ma60_falling(ma60, prev_ma60)
 
             if signal == "매수" and position is None and not stagnant:
-                position = {"buy_date": date_str, "buy_price": close, "name": name}
+                position = {"buy_date": date_str, "buy_price": close}
             elif signal == "매도" and position is not None:
                 ret_pct = round((close - position["buy_price"]) / position["buy_price"] * 100, 2)
                 all_trades.append(TradeRecord(
@@ -453,7 +450,6 @@ async def get_model_performance(
             if ma60 is not None:
                 prev_ma60 = float(ma60)
 
-        # 미청산 보유 종목
         if position is not None and latest_price is not None:
             unrealized_pct = round((latest_price - position["buy_price"]) / position["buy_price"] * 100, 2)
             holdings.append(HoldingItem(
@@ -467,7 +463,6 @@ async def get_model_performance(
                 sell_date=None, sell_price=latest_price, unrealized_pct=unrealized_pct,
             ))
 
-    # 집계
     win = [r for r in realized_returns if r > 0]
     lose = [r for r in realized_returns if r <= 0]
     total = len(realized_returns)
@@ -475,9 +470,11 @@ async def get_model_performance(
     for r in realized_returns:
         cumulative *= (1 + r / 100)
 
-    # 최신순 정렬
     all_trades.sort(key=lambda t: t.buy_date, reverse=True)
     holdings.sort(key=lambda h: h.unrealized_pct, reverse=True)
+    completed = [t for t in all_trades if t.return_pct is not None]
+    open_t = [t for t in all_trades if t.unrealized_pct is not None]
+    all_trades = completed[:200] + open_t
 
     return PerformanceResponse(
         model_id=model_id,
