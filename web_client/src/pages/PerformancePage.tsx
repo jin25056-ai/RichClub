@@ -117,11 +117,11 @@ const PerformancePage: React.FC = () => {
 
   const [perfData, setPerfData] = useState<PerformanceResponse | null>(null);
   const [perfLoading, setPerfLoading] = useState(false);
-  const [period, setPeriod] = useState<string>('3m');
+  const [period, setPeriod] = useState<string>('6m');
   const [perfYear, setPerfYear] = useState<number | undefined>(undefined);
   const [activeTab, setActiveTab] = useState<string>('trades');
   const [subTab, setSubTab] = useState<string>('bystock');
-  const [calcMode, setCalcMode] = useState<CalcMode>('avg');
+  const [calcMode, setCalcMode] = useState<CalcMode>('sum');
   const [showModeInfo, setShowModeInfo] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [tradePage, setTradePage] = useState(1);
@@ -204,7 +204,6 @@ const PerformancePage: React.FC = () => {
         <YearDetailModal year={detailYear} modelId={selectedModel} onClose={() => setDetailYear(null)} />
       )}
 
-      {/* 헤더 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', borderBottom: '1px solid #1e1e2e', flexWrap: 'wrap' }}>
         <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>&#8592;</button>
         <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>AI 실적</span>
@@ -228,10 +227,8 @@ const PerformancePage: React.FC = () => {
 
       <div style={{ padding: '16px 20px', maxWidth: 1000, margin: '0 auto' }}>
 
-        {/* AI 실적 탭 */}
         {mainTab === 'perf' && (
           <>
-            {/* 기간/연도 필터 */}
             <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
               <span style={{ fontSize: 10, color: '#4b5563' }}>기간</span>
               {PERIODS.map((p) => (
@@ -255,7 +252,6 @@ const PerformancePage: React.FC = () => {
               <div style={{ textAlign: 'center', padding: '60px 0', color: '#4b5563' }}>데이터 없음</div>
             ) : (
               <>
-                {/* 수익률 기준 선택 */}
                 <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 10, color: '#4b5563', flexShrink: 0 }}>수익률 기준</span>
@@ -284,7 +280,6 @@ const PerformancePage: React.FC = () => {
                   )}
                 </div>
 
-                {/* 핵심 지표 */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
                   {[
                     { label: '승률', value: `${perfData.win_rate.toFixed(1)}%`, sub: `${perfData.win_count}승 ${perfData.lose_count}패`, color: perfData.win_rate >= 50 ? '#16a34a' : '#dc2626' },
@@ -299,7 +294,6 @@ const PerformancePage: React.FC = () => {
                   ))}
                 </div>
 
-                {/* 메인 탭: 매매기록(앞) / 현재보유(뒤) */}
                 <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid #1e1e2e', marginBottom: 12 }}>
                   {ACTIVE_TABS.map(({ key, label }) => {
                     const count = key === 'trades' ? completedTrades.length : perfData.holdings.length;
@@ -312,10 +306,8 @@ const PerformancePage: React.FC = () => {
                   })}
                 </div>
 
-                {/* 매매기록 탭 */}
                 {activeTab === 'trades' && (
                   <>
-                    {/* 서브탭: 종목별 수익률(앞) / 전체 목록(뒤) */}
                     <div style={{ display: 'flex', gap: 0, marginBottom: 12, background: '#1e1e2e', borderRadius: 6, overflow: 'hidden', width: 'fit-content' }}>
                       {SUB_TABS.map(({ key, label }) => (
                         <button key={key} onClick={() => { setSubTab(key); setSearchQuery(''); setTradePage(1); }}
@@ -325,7 +317,6 @@ const PerformancePage: React.FC = () => {
                       ))}
                     </div>
 
-                    {/* 종목별 수익률 */}
                     {subTab === 'bystock' && (
                       <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, overflow: 'hidden' }}>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 60px 80px 80px', padding: '8px 14px', borderBottom: '1px solid #1e1e2e', fontSize: 9, color: '#4b5563', fontWeight: 600 }}>
@@ -354,7 +345,6 @@ const PerformancePage: React.FC = () => {
                       </div>
                     )}
 
-                    {/* 전체 목록 */}
                     {subTab === 'list' && (
                       <>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}>
@@ -437,7 +427,6 @@ const PerformancePage: React.FC = () => {
                   </>
                 )}
 
-                {/* 현재 보유 탭 */}
                 {activeTab === 'holdings' && (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 8 }}>
                     {perfData.holdings.length === 0 ? (
@@ -468,7 +457,6 @@ const PerformancePage: React.FC = () => {
           </>
         )}
 
-        {/* 시뮬레이션 탭 */}
         {mainTab === 'sim' && (
           <>
             <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '16px 20px', marginBottom: 14 }}>
