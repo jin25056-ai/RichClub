@@ -26,21 +26,9 @@ const PAGE_SIZE = 50;
 type CalcMode = 'sum' | 'avg' | 'compound';
 
 const CALC_MODES: { key: CalcMode; label: string; desc: string }[] = [
-  {
-    key: 'sum',
-    label: '합산',
-    desc: '완료된 모든 거래의 수익률을 단순 합산합니다. (+와 - 모두 포함) 예: +10%, -5%, +20% → +25%. 고수익 거래가 있으면 크게 올라갑니다.',
-  },
-  {
-    key: 'avg',
-    label: '평균',
-    desc: '거래 1건당 평균 수익률입니다. 거래 횟수와 무관하게 모델의 실력을 비교할 때 유용합니다. 예: +10%, -5%, +20% → 평균 +8.33%.',
-  },
-  {
-    key: 'compound',
-    label: '복리',
-    desc: '매 거래 후 수익을 재투자한다고 가정한 누적 수익률입니다. 예: +10%, -5%, +20% → (1.1 × 0.95 × 1.2 - 1) = +25.3%. 거래가 많을수록 비현실적으로 커질 수 있습니다.',
-  },
+  { key: 'sum', label: '합산', desc: '완료된 모든 거래의 수익률을 단순 합산합니다. (+와 - 모두 포함) 예: +10%, -5%, +20% → +25%. 고수익 거래가 있으면 크게 올라갑니다.' },
+  { key: 'avg', label: '평균', desc: '거래 1건당 평균 수익률입니다. 거래 횟수와 무관하게 모델의 실력을 비교할 때 유용합니다. 예: +10%, -5%, +20% → 평균 +8.33%.' },
+  { key: 'compound', label: '복리', desc: '매 거래 후 수익을 재투자한다고 가정한 누적 수익률입니다. 예: +10%, -5%, +20% → (1.1 × 0.95 × 1.2 - 1) = +25.3%. 거래가 많을수록 비현실적으로 커질 수 있습니다.' },
 ];
 
 function calcCumulative(returns: number[], mode: CalcMode): number {
@@ -52,11 +40,7 @@ function calcCumulative(returns: number[], mode: CalcMode): number {
   return parseFloat(((c - 1) * 100).toFixed(2));
 }
 
-const YearDetailModal: React.FC<{
-  year: number;
-  modelId: string;
-  onClose: () => void;
-}> = ({ year, modelId, onClose }) => {
+const YearDetailModal: React.FC<{ year: number; modelId: string; onClose: () => void }> = ({ year, modelId, onClose }) => {
   const navigate = useNavigate();
   const [data, setData] = useState<PerformanceResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,15 +55,8 @@ const YearDetailModal: React.FC<{
   const completed = data?.trades.filter((t) => t.return_pct != null) ?? [];
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000,
-      display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-      paddingTop: 60, overflowY: 'auto',
-    }} onClick={onClose}>
-      <div style={{
-        background: '#0f0f1a', border: '1px solid #2d2d3d', borderRadius: 12,
-        width: '92%', maxWidth: 700, padding: '20px', marginBottom: 40,
-      }} onClick={(e) => e.stopPropagation()}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 60, overflowY: 'auto' }} onClick={onClose}>
+      <div style={{ background: '#0f0f1a', border: '1px solid #2d2d3d', borderRadius: 12, width: '92%', maxWidth: 700, padding: '20px', marginBottom: 40 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{year}년 매매 상세</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 18, cursor: 'pointer' }}>×</button>
@@ -106,15 +83,13 @@ const YearDetailModal: React.FC<{
             <div style={{ fontSize: 10, color: '#4b5563', marginBottom: 8 }}>완료 거래 {completed.length}건</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 460, overflowY: 'auto' }}>
               {completed.map((t: TradeRecord, i: number) => (
-                <div key={i}
-                  onClick={() => { if (t.stock_code) { onClose(); navigate(`/?code=${t.stock_code}`); } }}
+                <div key={i} onClick={() => { if (t.stock_code) { onClose(); navigate(`/?code=${t.stock_code}`); } }}
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderRadius: 7, cursor: t.stock_code ? 'pointer' : 'default', background: (t.return_pct ?? 0) >= 0 ? '#14532d10' : '#7f1d1d10', border: `1px solid ${pctColor(t.return_pct ?? 0)}22` }}
                   onMouseEnter={(e) => { if (t.stock_code) e.currentTarget.style.opacity = '0.75'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}>
                   <div>
                     <div style={{ fontSize: 11, color: '#d1d5db', fontWeight: 500, marginBottom: 3 }}>
-                      {t.stock_name}
-                      <span style={{ fontSize: 9, color: '#374151', marginLeft: 6 }}>{t.stock_code}</span>
+                      {t.stock_name}<span style={{ fontSize: 9, color: '#374151', marginLeft: 6 }}>{t.stock_code}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 6, fontSize: 9, color: '#6b7280' }}>
                       <span><span style={{ color: '#16a34a', fontWeight: 600 }}>B</span> {t.buy_date} · {fmtPrice(t.buy_price)}</span>
@@ -122,9 +97,7 @@ const YearDetailModal: React.FC<{
                       <span><span style={{ color: '#dc2626', fontWeight: 600 }}>S</span> {t.sell_date} · {fmtPrice(t.sell_price ?? 0)}</span>
                     </div>
                   </div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>
-                    {pctStr(t.return_pct ?? 0)}
-                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>{pctStr(t.return_pct ?? 0)}</div>
                 </div>
               ))}
             </div>
@@ -146,7 +119,7 @@ const PerformancePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'holdings' | 'trades'>('holdings');
   const [calcMode, setCalcMode] = useState<CalcMode>('sum');
   const [showModeInfo, setShowModeInfo] = useState(false);
-  const [filterStock, setFilterStock] = useState<{ code: string; name: string } | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [tradePage, setTradePage] = useState(1);
 
   const [simData, setSimData] = useState<SimulationResponse | null>(null);
@@ -178,19 +151,23 @@ const PerformancePage: React.FC = () => {
     fetchPerf(selectedModel, period, perfYear);
   }, [selectedModel, period, perfYear]);
 
+  // 보유 종목 카드 클릭 시 해당 종목으로 검색 필터
   const handleHoldingClick = (code: string, name: string) => {
-    setFilterStock({ code, name });
+    setSearchQuery(name);
     setActiveTab('trades');
     setTradePage(1);
   };
 
   const completedTrades = perfData?.trades.filter((t) => t.return_pct != null) ?? [];
-  // 종목 필터 시 전체 표시, 아닐 때 페이지네이션
-  const filteredTrades = filterStock
-    ? completedTrades.filter((t) => t.stock_code === filterStock.code)
+  const q = searchQuery.trim().toLowerCase();
+  const filteredTrades = q
+    ? completedTrades.filter((t) =>
+        t.stock_name?.toLowerCase().includes(q) || t.stock_code?.includes(q)
+      )
     : completedTrades;
-  const totalPages = filterStock ? 1 : Math.ceil(filteredTrades.length / PAGE_SIZE);
-  const pagedTrades = filterStock
+  const isFiltered = q.length > 0;
+  const totalPages = isFiltered ? 1 : Math.ceil(filteredTrades.length / PAGE_SIZE);
+  const pagedTrades = isFiltered
     ? filteredTrades
     : filteredTrades.slice((tradePage - 1) * PAGE_SIZE, tradePage * PAGE_SIZE);
 
@@ -233,14 +210,14 @@ const PerformancePage: React.FC = () => {
             <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
               <span style={{ fontSize: 10, color: '#4b5563' }}>기간</span>
               {PERIODS.map((p) => (
-                <button key={p} onClick={() => { setPeriod(p); setPerfYear(undefined); setFilterStock(null); setTradePage(1); }}
+                <button key={p} onClick={() => { setPeriod(p); setPerfYear(undefined); setSearchQuery(''); setTradePage(1); }}
                   style={{ padding: '3px 8px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: period === p && !perfYear ? '#6366f1' : '#1e1e2e', color: period === p && !perfYear ? '#fff' : '#555' }}>
                   {p}
                 </button>
               ))}
               <span style={{ fontSize: 10, color: '#4b5563', marginLeft: 8 }}>연도</span>
               {YEARS.map((y) => (
-                <button key={y} onClick={() => { setPerfYear(y); setFilterStock(null); setTradePage(1); }}
+                <button key={y} onClick={() => { setPerfYear(y); setSearchQuery(''); setTradePage(1); }}
                   style={{ padding: '3px 8px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: perfYear === y ? '#6366f1' : '#1e1e2e', color: perfYear === y ? '#fff' : '#555' }}>
                   {y}
                 </button>
@@ -297,22 +274,11 @@ const PerformancePage: React.FC = () => {
 
                 <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid #1e1e2e', marginBottom: 12 }}>
                   {[['holdings', `현재 보유 (${perfData.holdings.length})`], ['trades', `매매 기록 (${completedTrades.length}건)`]].map(([key, label]) => (
-                    <button key={key} onClick={() => { setActiveTab(key as 'holdings' | 'trades'); if (key === 'holdings') { setFilterStock(null); } setTradePage(1); }}
+                    <button key={key} onClick={() => { setActiveTab(key as 'holdings' | 'trades'); if (key === 'holdings') { setSearchQuery(''); } setTradePage(1); }}
                       style={{ padding: '8px 16px', fontSize: 11, border: 'none', cursor: 'pointer', background: 'transparent', color: activeTab === key ? '#a5b4fc' : '#555', fontWeight: activeTab === key ? 600 : 400, borderBottom: activeTab === key ? '2px solid #6366f1' : '2px solid transparent' }}>
                       {label}
                     </button>
                   ))}
-                  {filterStock && activeTab === 'trades' && (
-                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 9, color: '#a5b4fc', background: '#6366f122', padding: '2px 8px', borderRadius: 10, border: '1px solid #6366f144' }}>
-                        {filterStock.name} 만 보기 ({filteredTrades.length}건 전체)
-                      </span>
-                      <button onClick={() => { setFilterStock(null); setTradePage(1); }}
-                        style={{ fontSize: 10, color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer' }}>
-                        ×
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 {activeTab === 'holdings' && (
@@ -343,10 +309,31 @@ const PerformancePage: React.FC = () => {
 
                 {activeTab === 'trades' && (
                   <>
+                    {/* 종목 검색창 */}
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}>
+                      <input
+                        placeholder="종목명 또는 코드로 검색 (전체 건수에서 필터)"
+                        value={searchQuery}
+                        onChange={(e) => { setSearchQuery(e.target.value); setTradePage(1); }}
+                        style={{ flex: 1, background: '#1e1e2e', border: '1px solid #2d2d3d', borderRadius: 6, padding: '7px 12px', fontSize: 11, color: '#e2e8f0', outline: 'none' }}
+                      />
+                      {searchQuery && (
+                        <button onClick={() => { setSearchQuery(''); setTradePage(1); }}
+                          style={{ fontSize: 10, padding: '6px 12px', borderRadius: 6, border: '1px solid #2d2d3d', background: '#1e1e2e', color: '#9ca3af', cursor: 'pointer', flexShrink: 0 }}>
+                          초기화
+                        </button>
+                      )}
+                    </div>
+                    {isFiltered && (
+                      <div style={{ fontSize: 9, color: '#6366f1', marginBottom: 8 }}>
+                        "{searchQuery}" 검색 결과 {filteredTrades.length}건 (전체 {completedTrades.length}건)
+                      </div>
+                    )}
+
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {filteredTrades.length === 0 ? (
                         <div style={{ textAlign: 'center', padding: '30px 0', color: '#4b5563', fontSize: 12 }}>
-                          {filterStock ? `${filterStock.name}의 완료된 매매 기록이 없습니다` : '매매 기록 없음'}
+                          {isFiltered ? `"${searchQuery}"에 해당하는 매매 기록이 없습니다` : '매매 기록 없음'}
                         </div>
                       ) : pagedTrades.map((t: TradeRecord, i: number) => (
                         <div key={i} onClick={() => { if (t.stock_code) navigate(`/?code=${t.stock_code}`); }}
@@ -371,8 +358,8 @@ const PerformancePage: React.FC = () => {
                       ))}
                     </div>
 
-                    {/* 페이지네이션 (종목 필터 없을 때만) */}
-                    {!filterStock && totalPages > 1 && (
+                    {/* 페이지네이션 (검색 없을 때만) */}
+                    {!isFiltered && totalPages > 1 && (
                       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, marginTop: 16 }}>
                         <button onClick={() => setTradePage((p) => Math.max(1, p - 1))} disabled={tradePage === 1}
                           style={{ padding: '4px 10px', fontSize: 10, borderRadius: 4, border: '1px solid #2d2d3d', background: '#1e1e2e', color: tradePage === 1 ? '#374151' : '#9ca3af', cursor: tradePage === 1 ? 'default' : 'pointer' }}>
@@ -387,7 +374,7 @@ const PerformancePage: React.FC = () => {
                           }, [])
                           .map((p, i) => (
                             typeof p === 'string' ? (
-                              <span key={`ellipsis-${i}`} style={{ fontSize: 10, color: '#374151' }}>...</span>
+                              <span key={`e-${i}`} style={{ fontSize: 10, color: '#374151' }}>...</span>
                             ) : (
                               <button key={p} onClick={() => setTradePage(p)}
                                 style={{ padding: '4px 8px', fontSize: 10, borderRadius: 4, border: '1px solid #2d2d3d', background: tradePage === p ? '#6366f1' : '#1e1e2e', color: tradePage === p ? '#fff' : '#9ca3af', cursor: 'pointer', minWidth: 28 }}>
