@@ -70,11 +70,14 @@ def _safe(v):
 
 def _predict_signal(lgb, xgb, features, label_map, row: pd.Series) -> str:
     """LGB + XGB 소프트 보팅으로 최종 신호 결정."""
+    import warnings
     idx_to_label = label_map.get("idx_to_label", {})
-    X = row[features].fillna(0).values.reshape(1, -1)
+    X = pd.DataFrame([row[features].fillna(0).values], columns=features)
 
-    lgb_prob = lgb.predict_proba(X)[0]
-    xgb_prob = xgb.predict_proba(X)[0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        lgb_prob = lgb.predict_proba(X)[0]
+        xgb_prob = xgb.predict_proba(X)[0]
     avg_prob = (lgb_prob + xgb_prob) / 2
     pred_idx = int(np.argmax(avg_prob))
     pred_label = idx_to_label.get(pred_idx, 2)
