@@ -8,20 +8,20 @@ app/ml/predictor.py
 """
 import asyncio
 import logging
+import numpy as np
+import pandas as pd
 from datetime import datetime, timezone, timedelta
 
-import pandas as pd
 import yfinance as yf
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ASCENDING, UpdateOne
 
-from app.ml.trainer import FEATURE_COLS, LABEL_MAP, KOSPI_STOCKS, _fetch_market_data, _build_features
+from app.ml.trainer import FEATURE_COLS, LABEL_MAP, KOSPI_STOCKS, _fetch_market_data
 
 logger = logging.getLogger(__name__)
 
-# 종목별 yfinance 재시도 설정
 _RETRY_COUNT = 3
-_RETRY_DELAY = 5  # 초
+_RETRY_DELAY = 5
 
 
 def _safe(v):
@@ -30,6 +30,57 @@ def _safe(v):
         return None if f != f else round(f, 4)
     except Exception:
         return None
+
+
+def _build_features_for_predict(raw: pd.DataFrame, market_map: dict, stock_name: str) -> pd.DataFrame:
+    """
+    예측 전용 feature 계산 - target 레이블링/필터링 없이 전 행 반환.
+    _build_features와 동일한 feature 계산만 수행.
+    """
+    df = raw.copy()
+    if isinstance(df.columns, pd.MultiIndex):
+        if df.columns.nlevels == 2:
+            df.columns = df.columns.get_level_values(0)
+        else:
+            df.columns = df.columns.droplevel(-1)
+    df.columns = [c.lower() for c in df.columns]
+    df = df.rename(columns={'adj close': 'close', 'price': 'close'})
+    df.index = pd.to_datetime(df.index)
+    df = df.dropna(subset=['close'])
+    df['stock_name'] = stock_name
+
+    close = df['close']
+    df['ma5'] = close.rolling(5).mean()
+    df['ma20'] = close.rolling(20).mean()
+    df['ma60'] = close.rolling(60).mean()
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    df['macd'] = ema12 - ema26
+    low_min = df['low'].rolling(12).min()
+    high_max = df['high'].rolling(12).max()
+    fast_k = 100 * ((close - low_min) / (high_max - low_min).replace(0, np.nan))
+    df['stoch_k'] = fast_k.rolling(3).mean()
+    df['stoch_d'] = df['stoch_k'].rolling(5).mean()
+    direction = np.sign(close.diff())
+    df['obv'] = (direction * df['volume']).fillna(0).cumsum()
+
+    sp500_s = pd.Series({pd.Timestamp(k): v['sp500'] for k, v in market_map.items()})
+    vix_s = pd.Series({pd.Timestamp(k): v['vix'] for k, v in market_map.items()})
+    df['sp500'] = sp500_s.reindex(df.index, method='ffill')
+    df['vix'] = vix_s.reindex(df.index, method='ffill')
+    df['sp500_ma20'] = df['sp500'].rolling(20).mean()
+    df['vix_value'] = df['vix']
+
+    df['ma5_20_ratio'] = df['ma5'] / df['ma20']
+    df['ma20_60_ratio'] = df['ma20'] / df['ma60']
+    df['close_ma60_ratio'] = close / df['ma60']
+    df['vol_change'] = df['volume'].pct_change()
+    df['macd_change'] = df['macd'].diff()
+    df['stoch_k_change'] = df['stoch_k'].diff()
+    df['sp500_ma_ratio'] = df['sp500'] / df['sp500_ma20']
+
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    return df
 
 
 async def _fetch_stock_with_retry(ticker: str, buf_start: str, end_dt: str) -> pd.DataFrame:
@@ -47,7 +98,6 @@ async def _fetch_stock_with_retry(ticker: str, buf_start: str, end_dt: str) -> p
             )
             if raw is not None and not raw.empty:
                 return raw
-            # 빈 데이터는 상장폐지 등으로 재시도해도 의미 없으므로 바로 반환
             return pd.DataFrame()
         except Exception as e:
             last_exc = e
@@ -57,6 +107,39 @@ async def _fetch_stock_with_retry(ticker: str, buf_start: str, end_dt: str) -> p
             else:
                 logger.error(f"[retry 최종 실패] {ticker}: {e}")
     raise last_exc
+
+
+async def _upsert_signal(col, name, code, dt, row, model):
+    """단일 행 예측 후 upsert"""
+    feat = row[FEATURE_COLS]
+    if feat.isna().any():
+        return False
+    pred_label = int(model.predict(pd.DataFrame([feat]))[0])
+    signal = LABEL_MAP.get(pred_label, '관망')
+    predicted_at = datetime(dt.year, dt.month, dt.day)
+    doc = {
+        'stock_code': code, 'stock_name': name,
+        'close': _safe(row.get('close')), 'open': _safe(row.get('open')),
+        'high': _safe(row.get('high')), 'low': _safe(row.get('low')),
+        'volume': _safe(row.get('volume')),
+        'signal': signal, 'signal_label': pred_label,
+        'macd': _safe(row.get('macd')),
+        'stoch_k': _safe(row.get('stoch_k')), 'stoch_d': _safe(row.get('stoch_d')),
+        'ma5': _safe(row.get('ma5')), 'ma20': _safe(row.get('ma20')), 'ma60': _safe(row.get('ma60')),
+        'ma5_20_ratio': _safe(row.get('ma5_20_ratio')),
+        'ma20_60_ratio': _safe(row.get('ma20_60_ratio')),
+        'close_ma60_ratio': _safe(row.get('close_ma60_ratio')),
+        'vix_value': _safe(row.get('vix_value')),
+        'predicted_at': predicted_at,
+        'uploaded_at': datetime.utcnow(),
+        'ret_1d': None, 'ret_5d': None, 'ret_20d': None, 'ret_60d': None,
+        'is_correct_5d': None,
+    }
+    await col.update_one(
+        {'stock_name': name, 'predicted_at': predicted_at},
+        {'$set': doc}, upsert=True
+    )
+    return True
 
 
 async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None):
@@ -90,50 +173,22 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
                 logger.warning(f"[predictor] {name}({ticker}) 데이터 없음 - 스킵")
                 continue
 
-            df = _build_features(raw, market_map, name)
+            df = _build_features_for_predict(raw, market_map, name)
             today_rows = df[df.index.strftime('%Y-%m-%d') == today]
             if today_rows.empty:
                 logger.warning(f"[predictor] {name}({ticker}) 오늘({today}) 데이터 없음 - 스킵")
                 continue
 
             for dt, row in today_rows.iterrows():
-                feat = row[FEATURE_COLS]
-                if feat.isna().any():
-                    continue
-
-                pred_label = int(model.predict(pd.DataFrame([feat]))[0])
-                signal = LABEL_MAP.get(pred_label, '관망')
-                predicted_at = datetime(dt.year, dt.month, dt.day)
-
-                doc = {
-                    'stock_code': code, 'stock_name': name,
-                    'close': _safe(row.get('close')), 'open': _safe(row.get('open')),
-                    'high': _safe(row.get('high')), 'low': _safe(row.get('low')),
-                    'volume': _safe(row.get('volume')),
-                    'signal': signal, 'signal_label': pred_label,
-                    'macd': _safe(row.get('macd')),
-                    'stoch_k': _safe(row.get('stoch_k')), 'stoch_d': _safe(row.get('stoch_d')),
-                    'ma5': _safe(row.get('ma5')), 'ma20': _safe(row.get('ma20')), 'ma60': _safe(row.get('ma60')),
-                    'ma5_20_ratio': _safe(row.get('ma5_20_ratio')),
-                    'ma20_60_ratio': _safe(row.get('ma20_60_ratio')),
-                    'close_ma60_ratio': _safe(row.get('close_ma60_ratio')),
-                    'vix_value': _safe(row.get('vix_value')),
-                    'predicted_at': predicted_at,
-                    'uploaded_at': datetime.utcnow(),
-                    'ret_1d': None, 'ret_5d': None, 'ret_20d': None, 'ret_60d': None,
-                    'is_correct_5d': None,
-                }
-                await col.update_one(
-                    {'stock_name': name, 'predicted_at': predicted_at},
-                    {'$set': doc}, upsert=True
-                )
-                total += 1
+                ok = await _upsert_signal(col, name, code, dt, row, model)
+                if ok:
+                    total += 1
 
         except Exception as e:
             logger.error(f"[predictor] {name}({ticker}) 예측 최종 실패: {e}")
             failed_tickers.append((ticker, name, code))
 
-    # 실패 종목 1회 추가 재시도 (전체 루프 후)
+    # 실패 종목 1회 추가 재시도
     if failed_tickers:
         logger.warning(f"[predictor] 실패 종목 {len(failed_tickers)}개 재시도: {[n for _, n, _ in failed_tickers]}")
         await asyncio.sleep(10)
@@ -142,41 +197,15 @@ async def run_daily_prediction(db: AsyncIOMotorDatabase, target_date: str = None
                 raw = await _fetch_stock_with_retry(ticker, buf_start, end_dt)
                 if raw.empty:
                     continue
-                df = _build_features(raw, market_map, name)
+                df = _build_features_for_predict(raw, market_map, name)
                 today_rows = df[df.index.strftime('%Y-%m-%d') == today]
                 if today_rows.empty:
                     continue
                 for dt, row in today_rows.iterrows():
-                    feat = row[FEATURE_COLS]
-                    if feat.isna().any():
-                        continue
-                    pred_label = int(model.predict(pd.DataFrame([feat]))[0])
-                    signal = LABEL_MAP.get(pred_label, '관망')
-                    predicted_at = datetime(dt.year, dt.month, dt.day)
-                    doc = {
-                        'stock_code': code, 'stock_name': name,
-                        'close': _safe(row.get('close')), 'open': _safe(row.get('open')),
-                        'high': _safe(row.get('high')), 'low': _safe(row.get('low')),
-                        'volume': _safe(row.get('volume')),
-                        'signal': signal, 'signal_label': pred_label,
-                        'macd': _safe(row.get('macd')),
-                        'stoch_k': _safe(row.get('stoch_k')), 'stoch_d': _safe(row.get('stoch_d')),
-                        'ma5': _safe(row.get('ma5')), 'ma20': _safe(row.get('ma20')), 'ma60': _safe(row.get('ma60')),
-                        'ma5_20_ratio': _safe(row.get('ma5_20_ratio')),
-                        'ma20_60_ratio': _safe(row.get('ma20_60_ratio')),
-                        'close_ma60_ratio': _safe(row.get('close_ma60_ratio')),
-                        'vix_value': _safe(row.get('vix_value')),
-                        'predicted_at': predicted_at,
-                        'uploaded_at': datetime.utcnow(),
-                        'ret_1d': None, 'ret_5d': None, 'ret_20d': None, 'ret_60d': None,
-                        'is_correct_5d': None,
-                    }
-                    await col.update_one(
-                        {'stock_name': name, 'predicted_at': predicted_at},
-                        {'$set': doc}, upsert=True
-                    )
-                    total += 1
-                    logger.info(f"[predictor] 재시도 성공: {name}")
+                    ok = await _upsert_signal(col, name, code, dt, row, model)
+                    if ok:
+                        total += 1
+                        logger.info(f"[predictor] 재시도 성공: {name}")
             except Exception as e:
                 logger.error(f"[predictor] {name}({ticker}) 재시도도 실패: {e}")
 
