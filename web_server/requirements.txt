@@ -19,3 +19,5 @@ pydantic-settings
 python-dotenv
 aiosmtplib
 email-validator
+lxml
+requests
