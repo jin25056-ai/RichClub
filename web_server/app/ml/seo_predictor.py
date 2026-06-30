@@ -281,7 +281,8 @@ async def run_daily_seo_prediction(db: AsyncIOMotorDatabase, model_id: str = "se
 
     lgb, xgb, features, label_map, lgb_reg = models
 
-    from app.ml.trainer import KOSPI_STOCKS, _fetch_market_data, _build_features
+    from app.ml.trainer import KOSPI_STOCKS, _fetch_market_data
+    from app.ml.predictor import _build_features_for_predict
 
     today = target_date or datetime.now().strftime("%Y-%m-%d")
     buf_start = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=120)).strftime("%Y-%m-%d")
@@ -327,7 +328,7 @@ async def run_daily_seo_prediction(db: AsyncIOMotorDatabase, model_id: str = "se
             if raw is None or raw.empty:
                 continue
 
-            df = _build_features(raw, market_map, name)
+            df = _build_features_for_predict(raw, market_map, name)
             today_rows = df[df.index.strftime("%Y-%m-%d") == today]
             if today_rows.empty:
                 continue
