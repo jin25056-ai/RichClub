@@ -61,7 +61,6 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({ user, onLogout, onPri
         {user.name}
         <span style={{ fontSize: 9, color: planInfo.color, fontWeight: 600, background: planInfo.color + '18', border: `1px solid ${planInfo.color}33`, borderRadius: 3, padding: '1px 5px' }}>{planInfo.label}</span>
       </button>
-
       {open && (
         <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 6, padding: '12px 14px', minWidth: 200, zIndex: 1000, boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
           <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #1e1e2e' }}>
@@ -158,16 +157,7 @@ const ExamplePage: React.FC = () => {
 
   const panel = { background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px' };
 
-  const intervalToggle = selectedStock ? (
-    <div style={{ display: 'inline-flex', background: '#0d0d1a', border: '1px solid #2a2a3d', borderRadius: 4, overflow: 'hidden', marginLeft: 4 }}>
-      {([['1d', '일봉'], ['5m', '5분']] as [ChartInterval, string][]).map(([iv, label]) => (
-        <button key={iv} onClick={() => setChartInterval(iv as ChartInterval)}
-          style={{ padding: '3px 10px', fontSize: 11, fontWeight: chartInterval === iv ? 600 : 400, border: 'none', borderRight: iv === '1d' ? '1px solid #2a2a3d' : 'none', cursor: 'pointer', background: chartInterval === iv ? '#1e1e35' : 'transparent', color: chartInterval === iv ? '#a5b4fc' : '#555', letterSpacing: '0.02em' }}>
-          {label}
-        </button>
-      ))}
-    </div>
-  ) : null;
+  const intervalToggle = null;
 
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0, flexWrap: 'wrap' }}>
@@ -192,13 +182,13 @@ const ExamplePage: React.FC = () => {
         </span>
       )}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+        <button onClick={() => navigate('/performance')}
+          style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#a5b4fc', border: '1px solid #3730a3', borderRadius: 4, cursor: 'pointer' }}>
+          AI 실적
+        </button>
         <button onClick={() => setTradeModalOpen(true)}
           style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#a5b4fc', border: '1px solid #3730a3', borderRadius: 4, cursor: 'pointer' }}>
           매매일지
-        </button>
-        <button onClick={() => setPricingModalOpen(true)}
-          style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#6b7280', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer' }}>
-          Pricing
         </button>
         <button onClick={() => window.open('/mlops', '_blank')}
           style={{ fontSize: 10, padding: '3px 8px', background: '#1e1e2e', color: '#6b7280', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer' }}>
@@ -293,11 +283,7 @@ const ExamplePage: React.FC = () => {
                   const model = models.find((m) => m.id === e.target.value);
                   if (model?.available) setSelectedModel(e.target.value);
                 }}
-                style={{
-                  width: '100%', background: '#1e1e2e', border: '1px solid #2d2d3d',
-                  borderRadius: 4, color: '#a5b4fc', fontSize: 11, fontWeight: 600,
-                  padding: '4px 8px', cursor: 'pointer', outline: 'none',
-                }}
+                style={{ width: '100%', background: '#1e1e2e', border: '1px solid #2d2d3d', borderRadius: 4, color: '#a5b4fc', fontSize: 11, fontWeight: 600, padding: '4px 8px', cursor: 'pointer', outline: 'none' }}
               >
                 {models.map((m) => (
                   <option key={m.id} value={m.id} disabled={!m.available}
