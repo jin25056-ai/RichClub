@@ -126,6 +126,9 @@ class PerformanceResponse(BaseModel):
 _cache: dict = {"data": None, "ts": 0}
 CACHE_TTL = 600
 
+_perf_cache: dict = {}
+_PERF_CACHE_TTL = 300
+
 GLOBAL_SYMBOLS = [
     {"symbol": "^IXIC",    "name": "나스닥"},
     {"symbol": "^GSPC",    "name": "S&P500"},
@@ -490,6 +493,11 @@ async def get_model_performance(
     _: dict = Depends(get_current_user),
 ):
     """AI 모델 전 종목 실적"""
+    cache_key = f"perf:{model_id}:{period}:{year}"
+    cached = _perf_cache.get(cache_key)
+    if cached and (time.time() - cached["ts"]) < _PERF_CACHE_TTL:
+        return cached["data"]
+
     if year:
         since = datetime(year, 1, 1, tzinfo=timezone.utc)
         until = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
@@ -516,7 +524,7 @@ async def get_model_performance(
     open_t = [t for t in all_trades if t.unrealized_pct is not None]
     all_trades = completed + open_t
 
-    return PerformanceResponse(
+    response = PerformanceResponse(
         model_id=model_id,
         period=period,
         year=year,
@@ -532,6 +540,8 @@ async def get_model_performance(
         trades=all_trades,
         updated_at=datetime.now(timezone.utc),
     )
+    _perf_cache[cache_key] = {"data": response, "ts": time.time()}
+    return response
 
 
 @router.get("/simulation/{model_id}", response_model=SimulationResponse, summary="AI 모델 포트폴리오 시뮬레이션")
@@ -552,6 +562,11 @@ async def get_simulation(
     - 동시 보유 max_stocks 초과 시 신규 매수 스킵
     - 매도 먼저 처리 후 매수 진입
     """
+    cache_key = f"sim:{model_id}:{principal}:{max_stocks}:{year}"
+    cached = _perf_cache.get(cache_key)
+    if cached and (time.time() - cached["ts"]) < _PERF_CACHE_TTL:
+        return cached["data"]
+
     years_to_sim = [year] if year else list(range(2021, datetime.now().year + 1))
     per_stock = principal / max_stocks
 
@@ -687,7 +702,7 @@ async def get_simulation(
     total_profit = running_amount - principal
     total_return_pct = round((total_profit / principal) * 100, 2) if principal > 0 else 0
 
-    return SimulationResponse(
+    return_response = SimulationResponse(
         model_id=model_id,
         principal=principal,
         max_stocks=max_stocks,
@@ -697,6 +712,8 @@ async def get_simulation(
         total_return_pct=total_return_pct,
         updated_at=datetime.now(timezone.utc),
     )
+    _perf_cache[cache_key] = {"data": return_response, "ts": time.time()}
+    return return_response
 
 
 @router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트 (AI) - 침체구간 제외")
