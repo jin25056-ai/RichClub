@@ -54,7 +54,11 @@ def _load_seo_model(model_id: str):
         xgb = joblib.load(os.path.join(model_dir, "xgb_classifier.pkl"))
         features = joblib.load(os.path.join(model_dir, "model_features.pkl"))
         label_map = joblib.load(os.path.join(model_dir, "target_label_map.pkl"))
-        return lgb, xgb, features, label_map
+        lgb_reg = None
+        reg_path = os.path.join(model_dir, "lgb_regressor.pkl")
+        if os.path.exists(reg_path):
+            lgb_reg = joblib.load(reg_path)
+        return lgb, xgb, features, label_map, lgb_reg
     except Exception as e:
         logger.error(f"[seo_predictor:{model_id}] 모델 로드 실패: {e}")
         return None
@@ -91,8 +95,20 @@ def _predict_signal(lgb, xgb, features, label_map, row: pd.Series) -> tuple:
     return SEO_SIGNAL_MAP.get(pred_label, "관망"), round(pred_score, 4)
 
 
+def _predict_reg_score(lgb_reg, features, row: pd.Series):
+    """lgb_regressor 단독 예측값. 원본 simulation_rev1.py의 regressor 분기(model.predict(X))와 동일."""
+    if lgb_reg is None:
+        return None
+    import warnings
+    X = pd.DataFrame([row[features].fillna(0).values], columns=features)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        val = lgb_reg.predict(X)[0]
+    return round(float(val), 6)
+
+
 def _build_ohlcv_doc(row: pd.Series, stock_code: str, stock_name: str,
-                     model_id: str, signal: str, pred_score: float, predicted_at: datetime) -> dict:
+                     model_id: str, signal: str, pred_score: float, reg_score, predicted_at: datetime) -> dict:
     close = _safe(row.get("close_pric") or row.get("close"))
     open_ = _safe(row.get("open_pric") or row.get("open") or row.get("mkp"))
     high  = _safe(row.get("high_pric") or row.get("high") or row.get("hipr"))
@@ -105,6 +121,7 @@ def _build_ohlcv_doc(row: pd.Series, stock_code: str, stock_name: str,
         "model_id": model_id,
         "signal": signal,
         "pred_score": round(float(pred_score), 4) if pred_score is not None else None,
+        "reg_score": round(float(reg_score), 6) if reg_score is not None else None,
         "above_max_volume_profile": int(vp) if vp is not None and not pd.isna(vp) else None,
         "target": int(target) if target is not None and not pd.isna(target) else None,
         "close": close,
@@ -130,7 +147,7 @@ async def run_full_seo_prediction(db: AsyncIOMotorDatabase, model_id: str = "seo
         logger.error(f"[seo_predictor:{model_id}] 모델 없음 - 전체 예측 중단")
         return
 
-    lgb, xgb, features, label_map = models
+    lgb, xgb, features, label_map, lgb_reg = models
     csv_dir, csv_encoding = _get_csv_config(model_id)
     years = [2021, 2022, 2023, 2024, 2025, 2026]
     col = db.total_trading_signals
@@ -180,7 +197,8 @@ async def run_full_seo_prediction(db: AsyncIOMotorDatabase, model_id: str = "seo
             stock_name = str(row.get("itmsNm", stock_code)).strip()
 
             signal, pred_score = _predict_signal(lgb, xgb, features, label_map, row)
-            doc = _build_ohlcv_doc(row, stock_code, stock_name, model_id, signal, pred_score, predicted_at)
+            reg_score = _predict_reg_score(lgb_reg, features, row)
+            doc = _build_ohlcv_doc(row, stock_code, stock_name, model_id, signal, pred_score, reg_score, predicted_at)
 
             bulk_ops.append(UpdateOne(
                 {"stock_code": stock_code, "predicted_at": predicted_at, "model_id": model_id},
@@ -211,7 +229,7 @@ async def run_daily_seo_prediction(db: AsyncIOMotorDatabase, model_id: str = "se
         logger.error(f"[seo_predictor:{model_id}] 모델 없음 - daily 예측 중단")
         return
 
-    lgb, xgb, features, label_map = models
+    lgb, xgb, features, label_map, lgb_reg = models
 
     from app.ml.trainer import KOSPI_STOCKS, _fetch_market_data, _build_features, FEATURE_COLS
 
@@ -243,11 +261,12 @@ async def run_daily_seo_prediction(db: AsyncIOMotorDatabase, model_id: str = "se
             for dt, row in today_rows.iterrows():
                 feat_series = pd.Series({f: row.get(f, 0) for f in features}).fillna(0)
                 signal, pred_score = _predict_signal(lgb, xgb, features, label_map, feat_series)
+                reg_score = _predict_reg_score(lgb_reg, features, feat_series)
 
                 predicted_at = datetime(dt.year, dt.month, dt.day)
                 doc = {
                     "stock_code": code, "stock_name": name,
-                    "model_id": model_id, "signal": signal, "pred_score": pred_score,
+                    "model_id": model_id, "signal": signal, "pred_score": pred_score, "reg_score": reg_score,
                     "above_max_volume_profile": None, "target": None,
                     "close": _safe(row.get("close")), "open": _safe(row.get("open")),
                     "high": _safe(row.get("high")), "low": _safe(row.get("low")),

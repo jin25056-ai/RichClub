@@ -546,14 +546,14 @@ async def get_model_performance(
 
 async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: datetime,
                                     running_amount: float, max_slots: int = 4,
-                                    pred_score_threshold: float = 0.70):
+                                    reg_score_threshold: float = 0.05):
     """
-    seo-model-v1/v2 원본 파이썬 시뮬레이션(simulation_rev1.py)과 동일한 로직.
-    - 매수: pred_score > threshold 이고 target != 3 이고 above_max_volume_profile == 1인 종목
+    seo-model-v1/v2 원본 파이썬 시뮬레이션(simulation_rev1.py, lgb_regressor 기준)와 동일한 로직.
+    - 매수: reg_score > threshold 이고 target != 3 이고 above_max_volume_profile == 1인 종목
     - 매도: 종가가 5일선(ma5) 아래로 떨어질 때 (AI 신호 무관)
-    - 동시 보유 종목수 제한: max_slots
+    - 동시 보유 종목수 제한: max_slots (원본 기본값 4)
     - 자금 배분: 매 순간 cash / available_slots로 동적 재계산
-    - 같은 날 여러 매수 후보 중 pred_score 높은 순으로 우선 매수
+    - 같은 날 여러 매수 후보 중 reg_score 높은 순으로 우선 매수
     """
     pipeline = [
         {"$match": {
@@ -568,7 +568,7 @@ async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: da
                 "d": "$predicted_at",
                 "c": "$close",
                 "ma5": "$ma5",
-                "score": "$pred_score",
+                "score": "$reg_score",
                 "vp": "$above_max_volume_profile",
                 "target": "$target",
             }},
@@ -635,7 +635,7 @@ async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: da
             close = row.get("c")
             if score is None or close is None:
                 continue
-            if float(score) <= pred_score_threshold:
+            if float(score) <= reg_score_threshold:
                 continue
             if target is not None and int(target) == 3:
                 continue
