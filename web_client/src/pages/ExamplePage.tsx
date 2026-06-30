@@ -157,16 +157,7 @@ const ExamplePage: React.FC = () => {
 
   const panel = { background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px' };
 
-  const intervalToggle = selectedStock ? (
-    <div style={{ display: 'inline-flex', background: '#0d0d1a', border: '1px solid #2a2a3d', borderRadius: 4, overflow: 'hidden', marginLeft: 4 }}>
-      {([['1d', '일봉'], ['5m', '5분']] as [ChartInterval, string][]).map(([iv, label]) => (
-        <button key={iv} onClick={() => setChartInterval(iv as ChartInterval)}
-          style={{ padding: '3px 10px', fontSize: 11, fontWeight: chartInterval === iv ? 600 : 400, border: 'none', borderRight: iv === '1d' ? '1px solid #2a2a3d' : 'none', cursor: 'pointer', background: chartInterval === iv ? '#1e1e35' : 'transparent', color: chartInterval === iv ? '#a5b4fc' : '#555', letterSpacing: '0.02em' }}>
-          {label}
-        </button>
-      ))}
-    </div>
-  ) : null;
+  const intervalToggle = null;
 
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0, flexWrap: 'wrap' }}>
