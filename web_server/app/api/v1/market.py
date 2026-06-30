@@ -403,43 +403,51 @@ async def _load_ichimoku_map(db, stock_codes: list, since: datetime) -> dict:
 
 
 async def _get_trades_for_period(db, model_id: str, since: datetime, until: datetime) -> list:
-    """기간 내 전 종목 매매 기록 추출 (MA60 침체 제외)"""
-    query = {
-        "model_id": model_id,
-        "predicted_at": {"$gte": since, "$lt": until},
-    }
-    docs = [doc async for doc in db.total_trading_signals.find(
-        query,
-        projection={"stock_code": 1, "stock_name": 1, "signal": 1, "predicted_at": 1, "close": 1, "ma60": 1}
-    ).sort("predicted_at", 1)]
+    """기간 내 전 종목 매매 기록 추출 (MA60 침체 제외)
 
-    sc_docs: dict = defaultdict(list)
-    sc_name: dict = {}
-    for doc in docs:
-        sc = doc.get("stock_code", "")
-        if sc:
-            sc_docs[sc].append(doc)
-            if sc not in sc_name:
-                sc_name[sc] = doc.get("stock_name", sc)
+    aggregation pipeline으로 종목별 배열을 서버 사이드에서 미리 그룹필하고 필요한 필드만 프로젝션해
+    네트워크 전송량과 BSON 오버헤드를 줄임.
+    """
+    pipeline = [
+        {"$match": {
+            "model_id": model_id,
+            "predicted_at": {"$gte": since, "$lt": until},
+            "stock_code": {"$ne": None, "$ne": ""},
+        }},
+        {"$sort": {"predicted_at": 1}},
+        {"$group": {
+            "_id": "$stock_code",
+            "stock_name": {"$first": "$stock_name"},
+            "rows": {"$push": {
+                "d": "$predicted_at",
+                "s": "$signal",
+                "c": "$close",
+                "m": "$ma60",
+            }},
+        }},
+    ]
 
     all_trades = []
     holdings = []
 
-    for sc, sdocs in sc_docs.items():
+    async for doc in db.total_trading_signals.aggregate(pipeline, allowDiskUse=True):
+        sc = doc["_id"]
+        name = doc.get("stock_name", sc)
+        rows = doc.get("rows", [])
+
         position = None
         latest_price = None
         prev_ma60 = None
-        name = sc_name.get(sc, sc)
 
-        for doc in sdocs:
-            signal = doc.get("signal", "관망")
-            dt = _to_date(doc.get("predicted_at"))
-            close = doc.get("close")
-            ma60 = doc.get("ma60")
+        for row in rows:
+            signal = row.get("s", "관망")
+            close = row.get("c")
+            ma60 = row.get("m")
             if close is None or float(close) <= 0:
                 continue
             close = float(close)
             latest_price = close
+            dt = _to_date(row.get("d"))
             date_str = dt.strftime("%Y-%m-%d")
             stagnant = _ma60_falling(ma60, prev_ma60)
 
@@ -554,37 +562,44 @@ async def get_simulation(
         since = datetime(y, 1, 1, tzinfo=timezone.utc)
         until = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
 
-        query = {
-            "model_id": model_id,
-            "predicted_at": {"$gte": since, "$lt": until},
-        }
-        docs = [doc async for doc in db.total_trading_signals.find(
-            query,
-            projection={"stock_code": 1, "stock_name": 1, "signal": 1, "predicted_at": 1, "close": 1, "ma60": 1}
-        ).sort("predicted_at", 1)]
+        pipeline = [
+            {"$match": {
+                "model_id": model_id,
+                "predicted_at": {"$gte": since, "$lt": until},
+                "stock_code": {"$ne": None, "$ne": ""},
+            }},
+            {"$sort": {"predicted_at": 1}},
+            {"$group": {
+                "_id": "$stock_code",
+                "rows": {"$push": {
+                    "d": "$predicted_at",
+                    "s": "$signal",
+                    "c": "$close",
+                    "m": "$ma60",
+                }},
+            }},
+        ]
 
-        if not docs:
+        sc_docs: dict = {}
+        async for doc in db.total_trading_signals.aggregate(pipeline, allowDiskUse=True):
+            sc_docs[doc["_id"]] = doc.get("rows", [])
+
+        if not sc_docs:
             continue
-
-        sc_docs: dict = defaultdict(list)
-        for doc in docs:
-            sc = doc.get("stock_code", "")
-            if sc:
-                sc_docs[sc].append(doc)
 
         # 날짜별 이벤트 수집
         events: list = []
-        for sc, sdocs in sc_docs.items():
+        for sc, rows in sc_docs.items():
             position = None
             prev_ma60 = None
-            for doc in sdocs:
-                signal = doc.get("signal", "관망")
-                dt = _to_date(doc.get("predicted_at"))
-                close = doc.get("close")
-                ma60 = doc.get("ma60")
+            for row in rows:
+                signal = row.get("s", "관망")
+                close = row.get("c")
+                ma60 = row.get("m")
                 if close is None or float(close) <= 0:
                     continue
                 close = float(close)
+                dt = _to_date(row.get("d"))
                 date_str = dt.strftime("%Y-%m-%d")
                 stagnant = _ma60_falling(ma60, prev_ma60)
 
