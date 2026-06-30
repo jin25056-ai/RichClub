@@ -554,6 +554,7 @@ async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: da
     - 동시 보유 종목수 제한: max_slots (원본 기본값 4)
     - 자금 배분: 매 순간 cash / available_slots로 동적 재계산
     - 같은 날 여러 매수 후보 중 reg_score 높은 순으로 우선 매수
+    반환: (최종잔액, 승, 패, 총거래, 수익률리스트, trades)
     """
     pipeline = [
         {"$match": {
@@ -564,6 +565,7 @@ async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: da
         {"$sort": {"predicted_at": 1}},
         {"$group": {
             "_id": "$stock_code",
+            "stock_name": {"$first": "$stock_name"},
             "rows": {"$push": {
                 "d": "$predicted_at",
                 "c": "$close",
@@ -576,22 +578,25 @@ async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: da
     ]
 
     by_date: dict = defaultdict(dict)  # date_str -> {sc: row}
+    sc_name: dict = {}
     async for doc in db.total_trading_signals.aggregate(pipeline, allowDiskUse=True):
         sc = doc["_id"]
+        sc_name[sc] = doc.get("stock_name", sc)
         for row in doc.get("rows", []):
             dt = _to_date(row.get("d"))
             date_str = dt.strftime("%Y-%m-%d")
             by_date[date_str][sc] = row
 
     if not by_date:
-        return running_amount, 0, 0, 0, []
+        return running_amount, 0, 0, 0, [], []
 
     all_dates = sorted(by_date.keys())
     cash = running_amount
-    portfolio: dict = {}  # sc -> {buy_price, shares, buy_total_amt}
+    portfolio: dict = {}  # sc -> {buy_price, shares, buy_total_amt, buy_date}
     win_count = 0
     lose_count = 0
     returns: list = []
+    trades: list = []
 
     for date_str in all_dates:
         day_rows = by_date[date_str]
@@ -619,12 +624,17 @@ async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: da
                     win_count += 1
                 else:
                     lose_count += 1
+                trades.append(TradeRecord(
+                    stock_code=sc, stock_name=sc_name.get(sc, sc),
+                    buy_date=info["buy_date"], buy_price=info["buy_price"],
+                    sell_date=date_str, sell_price=close, return_pct=round(ret_pct, 2),
+                ))
                 to_sell.append(sc)
 
         for sc in to_sell:
             del portfolio[sc]
 
-        # [2] 매수: pred_score > threshold, target != 3, vp == 1
+        # [2] 매수: reg_score > threshold, target != 3, vp == 1
         candidates = []
         for sc, row in day_rows.items():
             if sc in portfolio:
@@ -657,7 +667,7 @@ async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: da
                 continue
             buy_total = buy_price * shares
             cash -= buy_total
-            portfolio[sc] = {"buy_price": buy_price, "shares": shares, "buy_total_amt": buy_total}
+            portfolio[sc] = {"buy_price": buy_price, "shares": shares, "buy_total_amt": buy_total, "buy_date": date_str}
 
     # 마지막 날 강제 청산
     if all_dates and portfolio:
@@ -674,9 +684,14 @@ async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: da
                 win_count += 1
             else:
                 lose_count += 1
+            trades.append(TradeRecord(
+                stock_code=sc, stock_name=sc_name.get(sc, sc),
+                buy_date=info["buy_date"], buy_price=info["buy_price"],
+                sell_date=all_dates[-1], sell_price=close, return_pct=round(ret_pct, 2),
+            ))
         portfolio.clear()
 
-    return cash, win_count, lose_count, win_count + lose_count, returns
+    return cash, win_count, lose_count, win_count + lose_count, returns, trades
 
 
 @router.get("/simulation/{model_id}", response_model=SimulationResponse, summary="AI 모델 포트폴리오 시뮬레이션")
@@ -710,7 +725,7 @@ async def get_simulation(
             since = datetime(y, 1, 1, tzinfo=timezone.utc)
             until = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
 
-            final, win_count, lose_count, total_trades, returns = await _get_seo_simulation_year(
+            final, win_count, lose_count, total_trades, returns, _trades = await _get_seo_simulation_year(
                 db, model_id, since, until, running_amount, max_slots=max_stocks
             )
             if total_trades == 0 and final == running_amount:
@@ -894,6 +909,50 @@ async def get_simulation(
     )
     _perf_cache[cache_key] = {"data": return_response, "ts": time.time()}
     return return_response
+
+
+@router.get("/simulation-detail/{model_id}", response_model=WinRateResponse, summary="AI 시뮬레이션 연도별 상세 (실제 체결 거래 리스트)")
+async def get_simulation_detail(
+    model_id: str,
+    year: int = Query(...),
+    max_stocks: int = Query(10, ge=1, le=200),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """
+    시뮬레이션이 실제로 체결한 거래 리스트를 반환한다. (AI 신호 기반 전체 거래와는 다름)
+    seo-model 계열은 reg_score 기준 시뮬레이션, 그 외는 빈 거래 리스트 반환.
+    """
+    since = datetime(year, 1, 1, tzinfo=timezone.utc)
+    until = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+
+    if not model_id.startswith("seo-model"):
+        raise HTTPException(status_code=400, detail="현재 seo-model 계열만 지원합니다.")
+
+    _, win_count, lose_count, total_trades, returns, trades = await _get_seo_simulation_year(
+        db, model_id, since, until, running_amount=10_000_000, max_slots=max_stocks
+    )
+
+    trades.sort(key=lambda t: t.buy_date, reverse=True)
+    win = [r for r in returns if r > 0]
+
+    return WinRateResponse(
+        stock_code=None, stock_name=None, period=str(year),
+        results=[WinRateResult(
+            signal="시뮬레이션",
+            total_signals=total_trades,
+            win_count=win_count, lose_count=lose_count,
+            win_rate=round(len(win) / len(returns) * 100, 1) if returns else 0,
+            avg_return_pct=round(sum(returns) / len(returns), 2) if returns else 0,
+            max_return_pct=round(max(returns), 2) if returns else 0,
+            max_loss_pct=round(min(returns), 2) if returns else 0,
+            cumulative_return_pct=round(sum(returns), 2) if returns else 0,
+            unrealized_pct=None,
+            hold_days=0,
+        )],
+        trades=trades,
+        updated_at=datetime.now(timezone.utc),
+    )
 
 
 @router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트 (AI) - 침체구간 제외")

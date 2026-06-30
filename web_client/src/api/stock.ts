@@ -231,6 +231,9 @@ export const marketApi = {
 
   getSimulation: (model_id: string, principal: number, max_stocks: number, year?: number) =>
     apiClient.get<SimulationResponse>(`/api/v1/market/simulation/${model_id}`, { params: { principal, max_stocks, year } }),
+
+  getSimulationDetail: (model_id: string, year: number, max_stocks: number) =>
+    apiClient.get<WinRateResponse>(`/api/v1/market/simulation-detail/${model_id}`, { params: { year, max_stocks } }),
 };
 
 export const watchlistApi = {

@@ -39,19 +39,34 @@ function calcCumulative(returns: number[], mode: CalcMode): number {
   return parseFloat((returns.reduce((a, b) => a + b, 0) / returns.length).toFixed(2));
 }
 
-const YearDetailModal: React.FC<{ year: number; modelId: string; onClose: () => void }> = ({ year, modelId, onClose }) => {
+const YearDetailModal: React.FC<{ year: number; modelId: string; maxStocks: number; onClose: () => void }> = ({ year, modelId, maxStocks, onClose }) => {
   const navigate = useNavigate();
-  const [data, setData] = useState<PerformanceResponse | null>(null);
+  const [data, setData] = useState<{ trades: TradeRecord[] } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    marketApi.getPerformance(modelId, undefined, year)
-      .then((res) => setData(res.data))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [year, modelId]);
+    const isSeo = modelId.startsWith('seo-model');
+    if (isSeo) {
+      marketApi.getSimulationDetail(modelId, year, maxStocks)
+        .then((res) => setData({ trades: res.data.trades }))
+        .catch(() => setData(null))
+        .finally(() => setLoading(false));
+    } else {
+      marketApi.getPerformance(modelId, undefined, year)
+        .then((res) => setData({ trades: res.data.trades }))
+        .catch(() => setData(null))
+        .finally(() => setLoading(false));
+    }
+  }, [year, modelId, maxStocks]);
 
   const completed = data?.trades.filter((t) => t.return_pct != null) ?? [];
+  const completedRets = completed.map((t) => t.return_pct as number);
+  const detailWin = completedRets.filter((r) => r > 0).length;
+  const detailLose = completedRets.length - detailWin;
+  const detailWinRate = completedRets.length ? (detailWin / completedRets.length * 100) : 0;
+  const detailAvg = completedRets.length ? (completedRets.reduce((a, b) => a + b, 0) / completedRets.length) : 0;
+  const detailMax = completedRets.length ? Math.max(...completedRets) : 0;
+  const detailMin = completedRets.length ? Math.min(...completedRets) : 0;
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 60, overflowY: 'auto' }} onClick={onClose}>
@@ -68,9 +83,9 @@ const YearDetailModal: React.FC<{ year: number; modelId: string; onClose: () => 
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 16 }}>
               {[
-                { label: '승률', value: `${data.win_rate.toFixed(1)}%`, sub: `${data.win_count}승 ${data.lose_count}패`, color: data.win_rate >= 50 ? '#16a34a' : '#dc2626' },
-                { label: '평균 수익률', value: pctStr(data.avg_return_pct), sub: `거래 ${data.total_trades}건`, color: pctColor(data.avg_return_pct) },
-                { label: '최고/최저', value: pctStr(data.max_return_pct), sub: `최저 ${pctStr(data.max_loss_pct)}`, color: '#a5b4fc' },
+                { label: '승률', value: `${detailWinRate.toFixed(1)}%`, sub: `${detailWin}승 ${detailLose}패`, color: detailWinRate >= 50 ? '#16a34a' : '#dc2626' },
+                { label: '평균 수익률', value: pctStr(detailAvg), sub: `거래 ${completed.length}건`, color: pctColor(detailAvg) },
+                { label: '최고/최저', value: pctStr(detailMax), sub: `최저 ${pctStr(detailMin)}`, color: '#a5b4fc' },
               ].map((item) => (
                 <div key={item.label} style={{ background: '#1a1a2e', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
                   <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 4 }}>{item.label}</div>
@@ -197,7 +212,7 @@ const PerformancePage: React.FC = () => {
   return (
     <div style={{ background: '#0a0a14', minHeight: '100vh', fontFamily: 'inherit', color: '#e2e8f0' }}>
       {detailYear !== null && (
-        <YearDetailModal year={detailYear} modelId={selectedModel} onClose={() => setDetailYear(null)} />
+        <YearDetailModal year={detailYear} modelId={selectedModel} maxStocks={maxStocks} onClose={() => setDetailYear(null)} />
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', borderBottom: '1px solid #1e1e2e', flexWrap: 'wrap' }}>
