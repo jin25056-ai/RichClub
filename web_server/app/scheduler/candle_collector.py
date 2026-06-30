@@ -3,6 +3,7 @@
 - 장 중(KST 09:00~15:35 = UTC 00:00~06:35) 5분마다 실행
 - total_trading_signals 컬렉션의 종목 기준으로 수집
 - 30일 초과 데이터 자동 삭제
+- 상장폐지/조회 실패 종목은 블랙리스트로 캐싱하여 반복 호출 방지
 """
 import logging
 import asyncio
@@ -15,6 +16,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 logger = logging.getLogger(__name__)
 
 KEEP_DAYS = 90
+BLACKLIST_TTL_HOURS = 24
+MAX_CONCURRENT = 8
 
 
 async def _get_target_stocks(db: AsyncIOMotorDatabase) -> list:
@@ -33,13 +36,30 @@ async def _get_target_stocks(db: AsyncIOMotorDatabase) -> list:
     return stocks
 
 
-def _fetch_5min_data(stock_code: str) -> list:
-    """yfinance로 5분봉 수집"""
+async def _get_blacklist(db: AsyncIOMotorDatabase) -> set:
+    """최근 실패한 종목코드 조회 (TTL 내)"""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=BLACKLIST_TTL_HOURS)
+    cursor = db.candle_fetch_failures.find(
+        {"failed_at": {"$gte": cutoff}}, projection={"stock_code": 1}
+    )
+    return {doc["stock_code"] async for doc in cursor}
+
+
+async def _mark_failed(db: AsyncIOMotorDatabase, stock_code: str) -> None:
+    await db.candle_fetch_failures.update_one(
+        {"stock_code": stock_code},
+        {"$set": {"stock_code": stock_code, "failed_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+
+
+def _fetch_5min_data(stock_code: str) -> tuple:
+    """yfinance로 5분봉 수집. (records, success) 반환"""
     ticker = f"{stock_code}.KS"
     try:
         df = yf.download(ticker, period="1d", interval="5m", progress=False, auto_adjust=True)
         if df is None or df.empty:
-            return []
+            return [], False
 
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
@@ -59,10 +79,32 @@ def _fetch_5min_data(stock_code: str) -> list:
                 "volume": float(row.get("Volume", row.get("volume", 0))) if not pd.isna(row.get("Volume", row.get("volume", float('nan')))) else None,
                 "interval": "5m",
             })
-        return records
+        return records, True
     except Exception as e:
         logger.warning(f"5분봉 수집 실패 {stock_code}: {e}")
-        return []
+        return [], False
+
+
+async def _collect_one(db: AsyncIOMotorDatabase, stock_code: str, sem: asyncio.Semaphore) -> int:
+    """세마포어로 동시성 제한하며 종목 하나 수집"""
+    loop = asyncio.get_event_loop()
+    async with sem:
+        records, success = await loop.run_in_executor(None, _fetch_5min_data, stock_code)
+
+    if not success:
+        await _mark_failed(db, stock_code)
+        return 0
+
+    col = db.candles_5m
+    inserted = 0
+    for rec in records:
+        await col.update_one(
+            {"stock_code": rec["stock_code"], "datetime": rec["datetime"]},
+            {"$set": rec},
+            upsert=True,
+        )
+        inserted += 1
+    return inserted
 
 
 async def collect_5min_candles(db: AsyncIOMotorDatabase) -> None:
@@ -74,29 +116,26 @@ async def collect_5min_candles(db: AsyncIOMotorDatabase) -> None:
         logger.warning("수집 대상 종목 없음")
         return
 
+    blacklist = await _get_blacklist(db)
+    targets = [s for s in stocks if s["stock_code"] not in blacklist]
+    skipped = len(stocks) - len(targets)
+    if skipped:
+        logger.info(f"블랙리스트로 {skipped}개 종목 스킵")
+
     col = db.candles_5m
     await col.create_index([("stock_code", 1), ("datetime", 1)], unique=True, name="idx_stock_datetime")
     await col.create_index([("datetime", 1)], name="idx_datetime")
+    await db.candle_fetch_failures.create_index([("stock_code", 1)], unique=True, name="idx_failed_stock")
+    await db.candle_fetch_failures.create_index([("failed_at", 1)], expireAfterSeconds=BLACKLIST_TTL_HOURS * 3600, name="idx_failed_ttl")
 
-    total_inserted = 0
-    loop = asyncio.get_event_loop()
+    sem = asyncio.Semaphore(MAX_CONCURRENT)
+    results = await asyncio.gather(
+        *[_collect_one(db, s["stock_code"], sem) for s in targets],
+        return_exceptions=True,
+    )
+    total_inserted = sum(r for r in results if isinstance(r, int))
 
-    for stock in stocks:
-        stock_code = stock["stock_code"]
-        try:
-            records = await loop.run_in_executor(None, _fetch_5min_data, stock_code)
-            for rec in records:
-                await col.update_one(
-                    {"stock_code": rec["stock_code"], "datetime": rec["datetime"]},
-                    {"$set": rec},
-                    upsert=True,
-                )
-            total_inserted += len(records)
-        except Exception as e:
-            logger.error(f"5분봉 저장 실패 {stock_code}: {e}")
-        await asyncio.sleep(0.2)
-
-    logger.info(f"5분봉 수집 완료: {total_inserted}건 upsert")
+    logger.info(f"5분봉 수집 완료: {total_inserted}건 upsert ({len(targets)}개 종목 시도)")
     await _delete_old_candles(db)
 
 

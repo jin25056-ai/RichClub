@@ -130,10 +130,11 @@ def start_scheduler() -> None:
     scheduler.add_job(collect_market_data, trigger="cron",
                       hour="0,6", minute="0", id="collect_market_data", replace_existing=True)
 
-    scheduler.add_job(run_5min_candle_collection, trigger="cron",
-                      day_of_week="mon-fri", minute="*/5",
-                      id="collect_5min_candles", replace_existing=True,
-                      misfire_grace_time=240)
+    # 5분봉 수집은 종목이 너무 많아 부하가 타 이슈가 있어 비활성화 (jobs.py 주석 참고)
+    # scheduler.add_job(run_5min_candle_collection, trigger="cron",
+    #                   day_of_week="mon-fri", minute="*/5",
+    #                   id="collect_5min_candles", replace_existing=True,
+    #                   misfire_grace_time=240)
 
     # ju-model 일별 예측 (KST 15:35 = UTC 06:35) - 데이터 없으면 10분마다 재시도
     scheduler.add_job(run_daily_predict, trigger="cron",

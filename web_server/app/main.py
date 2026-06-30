@@ -18,6 +18,7 @@ ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "https://rich-club-front-end.vercel.app",
     "https://richclub-client.efforthye.dev",
+    "https://richclub.mayo.im",
     *(getenv("ALLOWED_ORIGINS", "").split(",") if getenv("ALLOWED_ORIGINS") else []),
 ]
 
