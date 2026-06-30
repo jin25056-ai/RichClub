@@ -27,7 +27,7 @@ MODEL_CONFIGS = {
     "seo-model-v1": {
         "model_dir": "/app/models/seo-model-v1",
         "csv_dir": "/app/collect_data/seojin",
-        "csv_encoding": "cp949",
+        "csv_encoding": "utf-8-sig",
     },
     "seo-model-v2": {
         "model_dir": "/app/models/seo-model-v2",
