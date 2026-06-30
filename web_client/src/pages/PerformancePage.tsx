@@ -476,13 +476,16 @@ const PerformancePage: React.FC = () => {
                 </div>
                 <div>
                   <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>동시 보유 종목 수</div>
-                  <div style={{ display: 'flex', gap: 3 }}>
+                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                     {MAX_STOCK_OPTIONS.map((n) => (
                       <button key={n} onClick={() => setMaxStocks(n)}
                         style={{ padding: '5px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: maxStocks === n ? '#6366f1' : '#1e1e2e', color: maxStocks === n ? '#fff' : '#666' }}>
                         {n}종목
                       </button>
                     ))}
+                    <input type="number" min={1} max={200} value={maxStocks}
+                      onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setMaxStocks(v); }}
+                      style={{ width: 56, background: '#1e1e2e', border: '1px solid #2d2d3d', borderRadius: 4, padding: '5px 6px', fontSize: 10, color: '#e2e8f0', outline: 'none' }} />
                   </div>
                 </div>
                 <div>
