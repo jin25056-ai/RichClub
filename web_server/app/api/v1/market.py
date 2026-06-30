@@ -544,6 +544,141 @@ async def get_model_performance(
     return response
 
 
+async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: datetime,
+                                    running_amount: float, max_slots: int = 4,
+                                    pred_score_threshold: float = 0.70):
+    """
+    seo-model-v1/v2 원본 파이썬 시뮬레이션(simulation_rev1.py)과 동일한 로직.
+    - 매수: pred_score > threshold 이고 target != 3 이고 above_max_volume_profile == 1인 종목
+    - 매도: 종가가 5일선(ma5) 아래로 떨어질 때 (AI 신호 무관)
+    - 동시 보유 종목수 제한: max_slots
+    - 자금 배분: 매 순간 cash / available_slots로 동적 재계산
+    - 같은 날 여러 매수 후보 중 pred_score 높은 순으로 우선 매수
+    """
+    pipeline = [
+        {"$match": {
+            "model_id": model_id,
+            "predicted_at": {"$gte": since, "$lt": until},
+            "stock_code": {"$ne": None, "$ne": ""},
+        }},
+        {"$sort": {"predicted_at": 1}},
+        {"$group": {
+            "_id": "$stock_code",
+            "rows": {"$push": {
+                "d": "$predicted_at",
+                "c": "$close",
+                "ma5": "$ma5",
+                "score": "$pred_score",
+                "vp": "$above_max_volume_profile",
+                "target": "$target",
+            }},
+        }},
+    ]
+
+    by_date: dict = defaultdict(dict)  # date_str -> {sc: row}
+    async for doc in db.total_trading_signals.aggregate(pipeline, allowDiskUse=True):
+        sc = doc["_id"]
+        for row in doc.get("rows", []):
+            dt = _to_date(row.get("d"))
+            date_str = dt.strftime("%Y-%m-%d")
+            by_date[date_str][sc] = row
+
+    if not by_date:
+        return running_amount, 0, 0, 0, []
+
+    all_dates = sorted(by_date.keys())
+    cash = running_amount
+    portfolio: dict = {}  # sc -> {buy_price, shares, buy_total_amt}
+    win_count = 0
+    lose_count = 0
+    returns: list = []
+
+    for date_str in all_dates:
+        day_rows = by_date[date_str]
+
+        # [1] 매도: 종가 < ma5 이면 매도
+        to_sell = []
+        for sc, info in list(portfolio.items()):
+            row = day_rows.get(sc)
+            if not row:
+                continue
+            close = row.get("c")
+            ma5 = row.get("ma5")
+            if close is None:
+                continue
+            close = float(close)
+            ma5_val = float(ma5) if ma5 is not None else close
+
+            if close < ma5_val:
+                sell_total = close * info["shares"]
+                cash += sell_total
+                profit = sell_total - info["buy_total_amt"]
+                ret_pct = (close / info["buy_price"] - 1) * 100
+                returns.append(ret_pct)
+                if profit > 0:
+                    win_count += 1
+                else:
+                    lose_count += 1
+                to_sell.append(sc)
+
+        for sc in to_sell:
+            del portfolio[sc]
+
+        # [2] 매수: pred_score > threshold, target != 3, vp == 1
+        candidates = []
+        for sc, row in day_rows.items():
+            if sc in portfolio:
+                continue
+            score = row.get("score")
+            target = row.get("target")
+            vp = row.get("vp")
+            close = row.get("c")
+            if score is None or close is None:
+                continue
+            if float(score) <= pred_score_threshold:
+                continue
+            if target is not None and int(target) == 3:
+                continue
+            if vp is not None and int(vp) != 1:
+                continue
+            candidates.append((sc, float(score), float(close)))
+
+        candidates.sort(key=lambda x: x[1], reverse=True)
+
+        for sc, score, buy_price in candidates:
+            available_slots = max_slots - len(portfolio)
+            if available_slots <= 0:
+                break
+            allocated_cash = cash / available_slots
+            if allocated_cash < 10000:
+                continue
+            shares = int(allocated_cash // buy_price)
+            if shares <= 0:
+                continue
+            buy_total = buy_price * shares
+            cash -= buy_total
+            portfolio[sc] = {"buy_price": buy_price, "shares": shares, "buy_total_amt": buy_total}
+
+    # 마지막 날 강제 청산
+    if all_dates and portfolio:
+        last_rows = by_date[all_dates[-1]]
+        for sc, info in list(portfolio.items()):
+            row = last_rows.get(sc)
+            close = float(row["c"]) if row and row.get("c") is not None else info["buy_price"]
+            sell_total = close * info["shares"]
+            cash += sell_total
+            profit = sell_total - info["buy_total_amt"]
+            ret_pct = (close / info["buy_price"] - 1) * 100
+            returns.append(ret_pct)
+            if profit > 0:
+                win_count += 1
+            else:
+                lose_count += 1
+        portfolio.clear()
+
+    return cash, win_count, lose_count, win_count + lose_count, returns
+
+
 @router.get("/simulation/{model_id}", response_model=SimulationResponse, summary="AI 모델 포트폴리오 시뮬레이션")
 async def get_simulation(
     model_id: str,
@@ -554,13 +689,9 @@ async def get_simulation(
     _: dict = Depends(get_current_user),
 ):
     """
-    포트폴리오 시뮬레이션 (현실적 방식)
-    - 종목당 투자금 = 전체 투자금 / max_stocks (균등 분배)
-    - 주가 체크: buy_price > 종목당 투자금이면 살 수 없으므로 스킵
-    - 실제 투자금 = floor(종목당투자금 / 주가) * 주가 (잔돈은 현금으로 남김)
-    - 같은 날 여러 매수 신호 발생 시 랜덤으로 선택 (편향 방지)
-    - 동시 보유 max_stocks 초과 시 신규 매수 스킵
-    - 매도 먼저 처리 후 매수 진입
+    포트폴리오 시뮬레이션.
+    - ju-model-v2: 기존 방식 (AI 신호 기반 매수/매도, 고정 배분)
+    - seo-model-v1/v2: 원본 파이썬 시뮬레이션과 동일한 로직 (pred_score 임계값 매수, 5일선 이탈 매도, 동적 배분)
     """
     cache_key = f"sim:{model_id}:{principal}:{max_stocks}:{year}"
     cached = _perf_cache.get(cache_key)
@@ -568,6 +699,55 @@ async def get_simulation(
         return cached["data"]
 
     years_to_sim = [year] if year else list(range(2021, datetime.now().year + 1))
+
+    is_seo_model = model_id.startswith("seo-model")
+
+    year_results: list = []
+    running_amount = principal
+
+    if is_seo_model:
+        for y in years_to_sim:
+            since = datetime(y, 1, 1, tzinfo=timezone.utc)
+            until = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
+
+            final, win_count, lose_count, total_trades, returns = await _get_seo_simulation_year(
+                db, model_id, since, until, running_amount, max_slots=max_stocks
+            )
+            if total_trades == 0 and final == running_amount:
+                continue
+
+            year_profit = final - running_amount
+            ret_pct_year = round((year_profit / running_amount) * 100, 2) if running_amount > 0 else 0
+
+            year_results.append(SimYearResult(
+                year=y,
+                total_trades=total_trades,
+                win_count=win_count,
+                lose_count=lose_count,
+                win_rate=round(win_count / total_trades * 100, 1) if total_trades > 0 else 0,
+                avg_return_pct=round(sum(returns) / len(returns), 2) if returns else 0,
+                final_amount=round(final, 0),
+                profit=round(year_profit, 0),
+                return_pct=ret_pct_year,
+            ))
+            running_amount = final
+
+        total_profit = running_amount - principal
+        total_return_pct = round((total_profit / principal) * 100, 2) if principal > 0 else 0
+
+        return_response = SimulationResponse(
+            model_id=model_id,
+            principal=principal,
+            max_stocks=max_stocks,
+            years=year_results,
+            total_final_amount=round(running_amount, 0),
+            total_profit=round(total_profit, 0),
+            total_return_pct=total_return_pct,
+            updated_at=datetime.now(timezone.utc),
+        )
+        _perf_cache[cache_key] = {"data": return_response, "ts": time.time()}
+        return return_response
+
     per_stock = principal / max_stocks
 
     year_results: list = []

@@ -68,10 +68,13 @@ def _safe(v):
         return None
 
 
-def _predict_signal(lgb, xgb, features, label_map, row: pd.Series) -> str:
-    """LGB + XGB 소프트 보팅으로 최종 신호 결정."""
+def _predict_signal(lgb, xgb, features, label_map, row: pd.Series) -> tuple:
+    """LGB + XGB 소프트 보팅으로 최종 신호 결정. (signal, pred_score) 반환.
+    pred_score는 원본 시뮬레이션(simulation_rev1.py)과 동일하게 레이블 1(매수/급등) 클래스의 확률값.
+    """
     import warnings
     idx_to_label = label_map.get("idx_to_label", {})
+    label_to_idx = label_map.get("label_to_idx", {})
     X = pd.DataFrame([row[features].fillna(0).values], columns=features)
 
     with warnings.catch_warnings():
@@ -81,20 +84,29 @@ def _predict_signal(lgb, xgb, features, label_map, row: pd.Series) -> str:
     avg_prob = (lgb_prob + xgb_prob) / 2
     pred_idx = int(np.argmax(avg_prob))
     pred_label = idx_to_label.get(pred_idx, 2)
-    return SEO_SIGNAL_MAP.get(pred_label, "관망")
+
+    buy_idx = label_to_idx.get(1, 1)
+    pred_score = float(avg_prob[buy_idx]) if buy_idx < len(avg_prob) else 0.0
+
+    return SEO_SIGNAL_MAP.get(pred_label, "관망"), round(pred_score, 4)
 
 
 def _build_ohlcv_doc(row: pd.Series, stock_code: str, stock_name: str,
-                     model_id: str, signal: str, predicted_at: datetime) -> dict:
+                     model_id: str, signal: str, pred_score: float, predicted_at: datetime) -> dict:
     close = _safe(row.get("close_pric") or row.get("close"))
     open_ = _safe(row.get("open_pric") or row.get("open") or row.get("mkp"))
     high  = _safe(row.get("high_pric") or row.get("high") or row.get("hipr"))
     low   = _safe(row.get("low_pric")  or row.get("low")  or row.get("lopr"))
+    vp = row.get("above_max_volume_profile")
+    target = row.get("target")
     return {
         "stock_code": stock_code,
         "stock_name": stock_name,
         "model_id": model_id,
         "signal": signal,
+        "pred_score": round(float(pred_score), 4) if pred_score is not None else None,
+        "above_max_volume_profile": int(vp) if vp is not None and not pd.isna(vp) else None,
+        "target": int(target) if target is not None and not pd.isna(target) else None,
         "close": close,
         "open": open_,
         "high": high,
@@ -167,8 +179,8 @@ async def run_full_seo_prediction(db: AsyncIOMotorDatabase, model_id: str = "seo
             stock_code = str(int(row["stk_cd"])).zfill(6)
             stock_name = str(row.get("itmsNm", stock_code)).strip()
 
-            signal = _predict_signal(lgb, xgb, features, label_map, row)
-            doc = _build_ohlcv_doc(row, stock_code, stock_name, model_id, signal, predicted_at)
+            signal, pred_score = _predict_signal(lgb, xgb, features, label_map, row)
+            doc = _build_ohlcv_doc(row, stock_code, stock_name, model_id, signal, pred_score, predicted_at)
 
             bulk_ops.append(UpdateOne(
                 {"stock_code": stock_code, "predicted_at": predicted_at, "model_id": model_id},
@@ -230,12 +242,13 @@ async def run_daily_seo_prediction(db: AsyncIOMotorDatabase, model_id: str = "se
 
             for dt, row in today_rows.iterrows():
                 feat_series = pd.Series({f: row.get(f, 0) for f in features}).fillna(0)
-                signal = _predict_signal(lgb, xgb, features, label_map, feat_series)
+                signal, pred_score = _predict_signal(lgb, xgb, features, label_map, feat_series)
 
                 predicted_at = datetime(dt.year, dt.month, dt.day)
                 doc = {
                     "stock_code": code, "stock_name": name,
-                    "model_id": model_id, "signal": signal,
+                    "model_id": model_id, "signal": signal, "pred_score": pred_score,
+                    "above_max_volume_profile": None, "target": None,
                     "close": _safe(row.get("close")), "open": _safe(row.get("open")),
                     "high": _safe(row.get("high")), "low": _safe(row.get("low")),
                     "volume": _safe(row.get("volume")),
