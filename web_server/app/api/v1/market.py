@@ -1028,31 +1028,51 @@ async def get_recommend(
             dt = datetime.strptime(target_date, "%Y-%m-%d")
         except ValueError:
             raise HTTPException(status_code=400, detail="날짜 형식은 YYYY-MM-DD")
+        since = dt.replace(tzinfo=timezone.utc)
+        until = since + timedelta(days=1)
     else:
+        # 오늘 날짜 기준으로 조회하되, 없으면 가장 최근 날짜로 폴백
         dt = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-
-    since = dt.replace(tzinfo=timezone.utc)
-    until = since + timedelta(days=1)
+        since = dt
+        until = since + timedelta(days=1)
 
     index_codes = _load_index_codes()
     if not index_codes:
         raise HTTPException(status_code=503, detail="KOSPI200/KOSDAQ150 종목 목록 로드 실패")
 
-    # 해당 날짜의 seo-model-v2 데이터 조회
-    docs = [doc async for doc in db.total_trading_signals.find(
-        {
-            "model_id": "seo-model-v2",
-            "predicted_at": {"$gte": since, "$lt": until},
-            "stock_code": {"$in": list(index_codes)},
-        },
-        projection={
-            "stock_code": 1, "stock_name": 1,
-            "pred_score": 1, "reg_score": 1,
-            "target": 1, "above_max_volume_profile": 1, "close": 1,
-        }
-    )]
+    # 해당 날짜의 seo-model-v2 데이터 조회 (vp/target 값이 있는 CSV 기반 데이터만)
+    async def _query_recommend(s, u):
+        return [doc async for doc in db.total_trading_signals.find(
+            {
+                "model_id": "seo-model-v2",
+                "predicted_at": {"$gte": s, "$lt": u},
+                "stock_code": {"$in": list(index_codes)},
+                "above_max_volume_profile": {"$in": [0, 1]},  # CSV 기반 데이터만 (None 제외)
+            },
+            projection={
+                "stock_code": 1, "stock_name": 1,
+                "pred_score": 1, "reg_score": 1,
+                "target": 1, "above_max_volume_profile": 1, "close": 1,
+                "predicted_at": 1,
+            }
+        )]
 
-    items: list = []
+    docs = await _query_recommend(since, until)
+
+    # 오늘 데이터 없으면 가장 최근 날짜로 폴백
+    if not docs and not target_date:
+        latest = await db.total_trading_signals.find_one(
+            {"model_id": "seo-model-v2", "above_max_volume_profile": {"$in": [0, 1]}},
+            sort=[("predicted_at", -1)],
+            projection={"predicted_at": 1},
+        )
+        if latest:
+            ld = latest["predicted_at"].replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+            docs = await _query_recommend(ld, ld + timedelta(days=1))
+            since = ld
+
+    # target==3(침체) 제외 + vp==1인 것만 + reg_score 양수 우선, 상위 20개
+    scored: list = []
     for doc in docs:
         code = doc.get("stock_code", "")
         name = doc.get("stock_name", code)
@@ -1067,32 +1087,30 @@ async def get_recommend(
         if vp is not None and int(vp) != 1:
             continue
 
-        # classifier 조건: pred_score > 0.70
-        if pred_score is not None and float(pred_score) > 0.70:
-            items.append(RecommendItem(
-                stock_code=code, stock_name=name,
-                model_name="lgb_classifier+xgb_classifier",
-                pred_score=round(float(pred_score), 4),
-                close=close,
-            ))
-
-        # regressor 조건: reg_score > 0.05
-        if reg_score is not None and float(reg_score) > 0.05:
-            items.append(RecommendItem(
+        # reg_score 양수 우선, 없으면 pred_score
+        if reg_score is not None and float(reg_score) > 0:
+            scored.append(RecommendItem(
                 stock_code=code, stock_name=name,
                 model_name="lgb_regressor",
                 pred_score=round(float(reg_score), 6),
                 close=close,
             ))
+        elif pred_score is not None and float(pred_score) > 0:
+            scored.append(RecommendItem(
+                stock_code=code, stock_name=name,
+                model_name="lgb_classifier+xgb_classifier",
+                pred_score=round(float(pred_score), 6),
+                close=close,
+            ))
 
-    # 중복 종목 처리: 같은 종목이 classifier+regressor 둘 다 조건 만족하면 reg_score 우선 (더 높은 score 기준)
+    # 중복 제거 후 score 내림차순 상위 20개
     seen: dict = {}
-    for item in items:
+    for item in scored:
         key = item.stock_code
         if key not in seen or item.pred_score > seen[key].pred_score:
             seen[key] = item
 
-    result = sorted(seen.values(), key=lambda x: x.pred_score, reverse=True)
+    result = sorted(seen.values(), key=lambda x: x.pred_score, reverse=True)[:20]
 
     return RecommendResponse(
         date=since.strftime("%Y-%m-%d"),
