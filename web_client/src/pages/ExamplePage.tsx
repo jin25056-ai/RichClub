@@ -88,6 +88,26 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({ user, onLogout, onPri
   );
 };
 
+const DISCLAIMER_TEXT = [
+  '본 서비스는 개발 포트폴리오 및 기술 시연을 위한 데모입니다. 제공되는 AI 분석, 예측, 점수 및 시뮬레이션 결과는 연구·학습 목적의 예시이며 투자자문 또는 금융투자상품에 대한 권유가 아닙니다. 본 서비스는 투자자문업 또는 유사투자자문업을 영위하지 않으며, 제공되는 정보를 실제 투자 의사결정의 근거로 사용해서는 안 됩니다. 투자에 따른 모든 책임은 투자자 본인에게 있습니다. 과거의 성과나 AI 예측 결과는 미래의 수익이나 성과를 보장하지 않습니다.',
+  'This service is a demo for portfolio and technical demonstration purposes only. AI analysis, predictions, scores, and simulation results are for research and educational purposes only and do not constitute investment advice. The information provided must not be used as the basis for actual investment decisions. All investment outcomes are the sole responsibility of the investor. Past performance and AI prediction results do not guarantee future returns or performance.',
+].join('          ');
+
+const DisclaimerMarquee: React.FC = () => (
+  <div style={{ overflow: 'hidden', padding: '3px 0', flexShrink: 0, borderTop: '1px solid #dc2626', borderBottom: '1px solid #dc2626' }}>
+    <style>{`
+      @keyframes richclub-marquee {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-50%); }
+      }
+    `}</style>
+    <div style={{ display: 'flex', whiteSpace: 'nowrap', animation: 'richclub-marquee 40s linear infinite' }}>
+      <span style={{ fontSize: 10, color: '#dc2626', paddingRight: 80 }}>{DISCLAIMER_TEXT}</span>
+      <span style={{ fontSize: 10, color: '#dc2626', paddingRight: 80 }}>{DISCLAIMER_TEXT}</span>
+    </div>
+  </div>
+);
+
 const ExamplePage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -175,14 +195,7 @@ const ExamplePage: React.FC = () => {
   ];
 
   const panel = { background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px' };
-
   const intervalToggle = null;
-
-  const disclaimer = (
-    <div style={{ background: '#1a1a2e', border: '1px solid #2d1f3d', borderRadius: 6, padding: '6px 10px', marginBottom: 6, fontSize: 9, color: '#6b5c8a', lineHeight: 1.5 }}>
-      본 서비스는 <strong style={{ color: '#7c6b9e' }}>개발 포트폴리오 데모 프로젝트</strong>입니다. AI 예측 결과는 참고용이며 실제 투자 조언이 아닙니다. 투자 결정은 본인 판단과 책임 하에 신중하게 내리시기 바랍니다.
-    </div>
-  );
 
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexShrink: 0, flexWrap: 'wrap' }}>
@@ -244,12 +257,10 @@ const ExamplePage: React.FC = () => {
   if (mobile) {
     return (
       <div style={{ background: '#0a0a14', minHeight: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}>
-        <div style={{ padding: '10px 12px 0', flexShrink: 0 }}>
-          {header}
-          {disclaimer}
-        </div>
+        <div style={{ padding: '10px 12px 4px', flexShrink: 0 }}>{header}</div>
+        <DisclaimerMarquee />
         {activeTab === 'chart' && (
-          <div style={{ display: 'flex', gap: 6, padding: '0 12px 8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 6, padding: '6px 12px', alignItems: 'center' }}>
             {(['1m', '3m', '6m'] as Period[]).map((p) => (
               <button key={p} onClick={() => setPeriod(p)}
                 style={{ padding: '3px 10px', fontSize: 11, borderRadius: 5, border: 'none', cursor: 'pointer', background: period === p ? '#6366f1' : '#1e1e2e', color: period === p ? '#fff' : '#888' }}>{p}</button>
@@ -259,7 +270,7 @@ const ExamplePage: React.FC = () => {
         )}
         <div style={{ flex: 1, padding: '0 12px', overflow: 'hidden' }}>
           {activeTab === 'chart' && (
-            <div style={{ ...panel, height: 'calc(100vh - 150px)', overflow: 'hidden' }}>
+            <div style={{ ...panel, height: 'calc(100vh - 155px)', overflow: 'hidden' }}>
               <StockSearchSection key={selectedModel} initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} modelId={selectedModel} />
             </div>
           )}
@@ -296,12 +307,12 @@ const ExamplePage: React.FC = () => {
   }
 
   return (
-    <div style={{ background: '#0a0a14', height: '100vh', overflow: 'hidden', padding: '10px 14px', fontFamily: 'inherit', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ background: '#0a0a14', height: '100vh', overflow: 'hidden', padding: '10px 14px 0', fontFamily: 'inherit', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
       {header}
-      {disclaimer}
+      <DisclaimerMarquee />
       <TradeModal isOpen={tradeModalOpen} onClose={() => setTradeModalOpen(false)} initialStockCode={selectedStock?.code} initialStockName={selectedStock?.name} initialPrice={currentPrice} />
       {pricingModal}
-      <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0, paddingTop: 6, paddingBottom: 10 }}>
         <div style={{ width: 190, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
           {models.length > 0 && (
             <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '8px 12px' }}>

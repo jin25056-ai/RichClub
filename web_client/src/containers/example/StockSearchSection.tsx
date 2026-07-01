@@ -15,7 +15,7 @@ const PERIOD_EXTRA = 60;
 const ICHIMOKU_SHIFT = 26;
 
 const getChartHeights = () => {
-  const available = window.innerHeight - 56 - 20 - 20 - 60;
+  const available = window.innerHeight - 56 - 20 - 20 - 80;
   return {
     candle: Math.floor(available * 0.52),
     macd:   Math.floor(available * 0.24),
