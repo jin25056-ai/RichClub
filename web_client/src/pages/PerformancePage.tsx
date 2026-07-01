@@ -39,8 +39,13 @@ function calcCumulative(returns: number[], mode: CalcMode): number {
   return parseFloat((returns.reduce((a, b) => a + b, 0) / returns.length).toFixed(2));
 }
 
-// 연도별 상세 거래 인라인 컴포넌트 (모달 없이 바로 표시)
-const YearDetailInline: React.FC<{ year: number; modelId: string; maxStocks: number }> = ({ year, modelId, maxStocks }) => {
+// 연도별 상세 거래 인라인 (principalNum, maxStocks prop 추가해서 하단 정보 표시)
+const YearDetailInline: React.FC<{
+  year: number;
+  modelId: string;
+  maxStocks: number;
+  principalNum?: number;
+}> = ({ year, modelId, maxStocks, principalNum }) => {
   const navigate = useNavigate();
   const [data, setData] = useState<{ trades: TradeRecord[] } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -87,7 +92,15 @@ const YearDetailInline: React.FC<{ year: number; modelId: string; maxStocks: num
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 10, color: '#4b5563', marginBottom: 8 }}>완료 거래 {completed.length}건</div>
+      {/* 완료 거래 건수(좌) + 종목당 투자금(우) 한 줄 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 10, color: '#4b5563' }}>완료 거래 {completed.length}건</div>
+        {principalNum !== undefined && (
+          <div style={{ fontSize: 9, color: '#374151' }}>
+            종목당 투자금 {fmtKRW(principalNum / maxStocks)}원 · 동시 최대 {maxStocks}종목
+          </div>
+        )}
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         {completed.map((t: TradeRecord, i: number) => (
           <div key={i} onClick={() => { if (t.stock_code) navigate(`/?code=${t.stock_code}`); }}
@@ -112,7 +125,7 @@ const YearDetailInline: React.FC<{ year: number; modelId: string; maxStocks: num
   );
 };
 
-// 전체 연도 모드에서 상세보기 클릭 시 모달
+// 전체 연도 모드 상세보기 모달
 const YearDetailModal: React.FC<{ year: number; modelId: string; maxStocks: number; onClose: () => void }> = ({ year, modelId, maxStocks, onClose }) => {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 60, overflowY: 'auto' }} onClick={onClose}>
@@ -141,11 +154,9 @@ const PerformancePage: React.FC = () => {
   const [showModeInfo, setShowModeInfo] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [tradePage, setTradePage] = useState(1);
-  // 기본 탭: 시뮬레이션
   const [mainTab, setMainTab] = useState<string>('sim');
   const [simData, setSimData] = useState<SimulationResponse | null>(null);
   const [simLoading, setSimLoading] = useState(false);
-  // 기본값: 원금 1천만, 동시보유 5종목, 2026년
   const [principal, setPrincipal] = useState('10000000');
   const [maxStocks, setMaxStocks] = useState(5);
   const [simYear, setSimYear] = useState<number | undefined>(CURRENT_YEAR);
@@ -172,7 +183,6 @@ const PerformancePage: React.FC = () => {
     fetchPerf(selectedModel, period, perfYear);
   }, [selectedModel, period, perfYear]);
 
-  // 페이지 최초 진입 시 시뮬레이션 자동 실행 (CURRENT_YEAR, 원금 1천만, 5종목)
   useEffect(() => {
     if (!localStorage.getItem('access_token')) return;
     fetchSim(selectedModel, 10000000, 5, CURRENT_YEAR);
@@ -221,17 +231,15 @@ const PerformancePage: React.FC = () => {
   const displayCumulative = calcCumulative(completedReturns, calcMode);
   const currentModeInfo = CALC_MODES.find((m) => m.key === calcMode)!;
   const principalNum = parseFloat(principal.replace(/,/g, '')) || 0;
-
-  // 단일 연도 선택 여부
   const isSingleYear = simYear !== undefined;
 
   return (
     <div style={{ background: '#0a0a14', minHeight: '100vh', fontFamily: 'inherit', color: '#e2e8f0' }}>
-      {/* 전체 연도 모드에서만 모달 사용 */}
       {detailYear !== null && !isSingleYear && (
         <YearDetailModal year={detailYear} modelId={selectedModel} maxStocks={maxStocks} onClose={() => setDetailYear(null)} />
       )}
 
+      {/* 헤더 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', borderBottom: '1px solid #1e1e2e', flexWrap: 'wrap' }}>
         <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>&#8592;</button>
         <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>AI 실적</span>
@@ -255,6 +263,7 @@ const PerformancePage: React.FC = () => {
 
       <div style={{ padding: '16px 20px', maxWidth: 1000, margin: '0 auto' }}>
 
+        {/* AI 실적 탭 */}
         {mainTab === 'perf' && (
           <>
             <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -485,64 +494,75 @@ const PerformancePage: React.FC = () => {
           </>
         )}
 
+        {/* 시뮬레이션 탭 */}
         {mainTab === 'sim' && (
           <>
-            <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '16px 20px', marginBottom: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 12 }}>시뮬레이션 설정</div>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'nowrap', overflowX: 'auto' }}>
-
-                <div>
-                  <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>투자 원금</div>
-                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            {/* 설정 영역: 컴팩트 한 줄 */}
+            <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '12px 16px', marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'nowrap', overflowX: 'auto' }}>
+                {/* 원금 */}
+                <div style={{ flexShrink: 0 }}>
+                  <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 4 }}>원금</div>
+                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                     <input value={principal} onChange={(e) => setPrincipal(e.target.value.replace(/[^0-9]/g, ''))}
-                      style={{ width: 120, background: '#1e1e2e', border: '1px solid #2d2d3d', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: '#e2e8f0', outline: 'none' }} />
-                    <span style={{ fontSize: 10, color: '#555' }}>원</span>
+                      style={{ width: 100, background: '#1e1e2e', border: '1px solid #2d2d3d', borderRadius: 6, padding: '5px 8px', fontSize: 11, color: '#e2e8f0', outline: 'none' }} />
+                    <span style={{ fontSize: 9, color: '#555' }}>원</span>
                   </div>
-                  <div style={{ display: 'flex', gap: 3, marginTop: 5 }}>
+                  <div style={{ display: 'flex', gap: 2, marginTop: 3 }}>
                     {[[100, '100만'], [500, '500만'], [1000, '1000만'], [5000, '5000만']].map(([w, label]) => (
                       <button key={w} onClick={() => setPrincipal(String(Number(w) * 10000))}
-                        style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, border: 'none', cursor: 'pointer', background: '#1e1e2e', color: '#888' }}>
+                        style={{ fontSize: 8, padding: '2px 5px', borderRadius: 3, border: 'none', cursor: 'pointer', background: '#1e1e2e', color: '#777' }}>
                         {label}
                       </button>
                     ))}
                   </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>동시 보유 종목 수</div>
-                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+
+                <div style={{ width: 1, height: 36, background: '#2d2d3d', flexShrink: 0 }} />
+
+                {/* 종목 수 */}
+                <div style={{ flexShrink: 0 }}>
+                  <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 4 }}>동시 보유</div>
+                  <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                     {MAX_STOCK_OPTIONS.map((n) => (
                       <button key={n} onClick={() => setMaxStocks(n)}
-                        style={{ padding: '5px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: maxStocks === n ? '#6366f1' : '#1e1e2e', color: maxStocks === n ? '#fff' : '#666' }}>
-                        {n}종목
+                        style={{ padding: '4px 8px', fontSize: 9, borderRadius: 4, border: 'none', cursor: 'pointer', background: maxStocks === n ? '#6366f1' : '#1e1e2e', color: maxStocks === n ? '#fff' : '#666', whiteSpace: 'nowrap' }}>
+                        {n}
                       </button>
                     ))}
                     <input type="number" min={1} max={200} value={maxStocks}
                       onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) setMaxStocks(v); }}
-                      style={{ width: 56, background: '#1e1e2e', border: '1px solid #2d2d3d', borderRadius: 4, padding: '5px 6px', fontSize: 10, color: '#e2e8f0', outline: 'none' }} />
+                      style={{ width: 44, background: '#1e1e2e', border: '1px solid #2d2d3d', borderRadius: 4, padding: '4px 5px', fontSize: 9, color: '#e2e8f0', outline: 'none' }} />
+                    <span style={{ fontSize: 9, color: '#555' }}>종목</span>
                   </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>연도 (전체면 비움)</div>
-                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+
+                <div style={{ width: 1, height: 36, background: '#2d2d3d', flexShrink: 0 }} />
+
+                {/* 연도 */}
+                <div style={{ flexShrink: 0 }}>
+                  <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 4 }}>연도</div>
+                  <div style={{ display: 'flex', gap: 2 }}>
                     <button onClick={() => setSimYear(undefined)}
-                      style={{ padding: '5px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: !simYear ? '#6366f1' : '#1e1e2e', color: !simYear ? '#fff' : '#666' }}>
+                      style={{ padding: '4px 8px', fontSize: 9, borderRadius: 4, border: 'none', cursor: 'pointer', background: !simYear ? '#6366f1' : '#1e1e2e', color: !simYear ? '#fff' : '#666' }}>
                       전체
                     </button>
                     {YEARS.map((y) => (
                       <button key={y} onClick={() => setSimYear(y)}
-                        style={{ padding: '5px 10px', fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', background: simYear === y ? '#6366f1' : '#1e1e2e', color: simYear === y ? '#fff' : '#666' }}>
+                        style={{ padding: '4px 8px', fontSize: 9, borderRadius: 4, border: 'none', cursor: 'pointer', background: simYear === y ? '#6366f1' : '#1e1e2e', color: simYear === y ? '#fff' : '#666' }}>
                         {y}
                       </button>
                     ))}
                   </div>
                 </div>
+
+                <div style={{ width: 1, height: 36, background: '#2d2d3d', flexShrink: 0 }} />
+
+                {/* 실행 버튼 */}
                 <button onClick={() => fetchSim(selectedModel, principalNum, maxStocks, simYear)} disabled={principalNum <= 0}
-                  style={{ padding: '8px 20px', fontSize: 11, borderRadius: 6, border: 'none', cursor: principalNum > 0 ? 'pointer' : 'default', background: principalNum > 0 ? '#6366f1' : '#374151', color: '#fff', fontWeight: 600, flexShrink: 0 }}>
-                  시뮬레이션 실행
+                  style={{ padding: '7px 16px', fontSize: 11, borderRadius: 6, border: 'none', cursor: principalNum > 0 ? 'pointer' : 'default', background: principalNum > 0 ? '#6366f1' : '#374151', color: '#fff', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                  실행
                 </button>
-              </div>
-              <div style={{ marginTop: 10, fontSize: 9, color: '#374151', lineHeight: 1.6 }}>
-                투자금을 동시 보유 종목 수로 균등 분배하여 AI 매수 신호마다 진입, 매도 신호에 청산하는 방식으로 계산합니다. 동시 보유 한도 초과 시 신규 매수는 건너뜁니다.
               </div>
             </div>
 
@@ -564,7 +584,7 @@ const PerformancePage: React.FC = () => {
                   ))}
                 </div>
 
-                {/* 단일 연도: 연도 요약 한 줄 + 상세 인라인 바로 표시 */}
+                {/* 단일 연도: 요약 + 상세 인라인 */}
                 {isSingleYear ? (
                   <>
                     {simData.years.map((yr: SimYearResult) => (
@@ -587,13 +607,13 @@ const PerformancePage: React.FC = () => {
                             <span style={{ textAlign: 'right', color: '#d1d5db', fontWeight: 500 }}>{fmtKRW(yr.final_amount)}원</span>
                           </div>
                         </div>
-                        {/* 단일 연도: 상세 바로 표시 */}
-                        <YearDetailInline year={yr.year} modelId={selectedModel} maxStocks={maxStocks} />
+                        {/* 상세 인라인 - 종목당 투자금을 "완료 거래 N건" 옆에 표시 */}
+                        <YearDetailInline year={yr.year} modelId={selectedModel} maxStocks={maxStocks} principalNum={principalNum} />
                       </div>
                     ))}
                   </>
                 ) : (
-                  /* 전체 연도: 테이블 + 상세보기 버튼 (모달) */
+                  /* 전체 연도: 테이블 + 상세보기 버튼 */
                   <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, overflow: 'hidden' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr 1fr 1fr 1fr 80px', padding: '10px 16px', borderBottom: '1px solid #1e1e2e', fontSize: 9, color: '#4b5563', fontWeight: 600 }}>
                       <span>연도</span>
@@ -622,14 +642,10 @@ const PerformancePage: React.FC = () => {
                     ))}
                   </div>
                 )}
-
-                <div style={{ marginTop: 8, fontSize: 9, color: '#374151', textAlign: 'right' }}>
-                  종목당 투자금 {fmtKRW(principalNum / maxStocks)}원 · 동시 최대 {simData.max_stocks}종목
-                </div>
               </>
             ) : (
               <div style={{ textAlign: 'center', padding: '40px 0', color: '#374151', fontSize: 12 }}>
-                설정 후 시뮬레이션 실행 버튼을 눌러주세요
+                설정 후 실행 버튼을 눌러주세요
               </div>
             )}
           </>
