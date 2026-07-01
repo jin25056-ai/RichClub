@@ -76,7 +76,7 @@ const YearDetailInline: React.FC<{
   const detailMax = completedRets.length ? Math.max(...completedRets) : 0;
   const detailMin = completedRets.length ? Math.min(...completedRets) : 0;
 
-  // buy_total, cash_after 둘 다 있는지 확인
+  // cash_after + buy_total 데이터가 있는지 확인
   const hasCashFlow = completed.some((t) => t.cash_after != null && t.buy_total != null);
 
   if (loading) return <div style={{ textAlign: 'center', padding: '30px 0', color: '#4b5563' }}>불러오는 중...</div>;
@@ -110,11 +110,9 @@ const YearDetailInline: React.FC<{
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         {completed.map((t, i) => {
           const buyTotal = t.buy_total ?? null;
-          // gain = 실투자금 × 수익률
           const gain = (t.return_pct != null && buyTotal != null)
             ? Math.round(buyTotal * (t.return_pct / 100))
             : null;
-          // prevCash: 이전 거래 청산 후 잔액. 첫 거래면 원금
           const prevCash = hasCashFlow
             ? (i === 0 ? (principalNum ?? null) : (completed[i - 1].cash_after ?? null))
             : null;
@@ -124,6 +122,7 @@ const YearDetailInline: React.FC<{
               style={{ borderRadius: 7, cursor: t.stock_code ? 'pointer' : 'default', background: (t.return_pct ?? 0) >= 0 ? '#14532d10' : '#7f1d1d10', border: `1px solid ${pctColor(t.return_pct ?? 0)}22`, overflow: 'hidden' }}
               onMouseEnter={(e) => { if (t.stock_code) e.currentTarget.style.opacity = '0.75'; }}
               onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}>
+              {/* 거래 정보 */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}>
                 <div>
                   <div style={{ fontSize: 11, color: '#d1d5db', fontWeight: 500, marginBottom: 3 }}>
@@ -137,32 +136,16 @@ const YearDetailInline: React.FC<{
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>{pctStr(t.return_pct ?? 0)}</div>
               </div>
-              {/* 잔액 흐름: 이전잔액 → 투자 → 수익 → 쟘액 */}
-              {prevCash != null && buyTotal != null && gain != null && t.cash_after != null && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px 6px', fontSize: 9, borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18`, flexWrap: 'wrap' }}>
-                  <span style={{ color: '#6b7280' }}>{fmtKRW(prevCash)}원</span>
-                  <span style={{ color: '#374151' }}>→</span>
-                  <span style={{ color: '#4b8eda', fontWeight: 600 }}>투자 -{fmtKRW(buyTotal)}원</span>
+              {/* 잔액 흐름: 잔액 N원 → 이 거래 ±gain원 → 잔액 M원 */}
+              {prevCash != null && gain != null && t.cash_after != null && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 12px 6px', fontSize: 9, borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18` }}>
+                  <span style={{ color: '#4b5563' }}>잔액 {fmtKRW(prevCash)}원</span>
                   <span style={{ color: '#374151' }}>→</span>
                   <span style={{ color: gain >= 0 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
-                    수익 {gain >= 0 ? '+' : ''}{fmtKRW(gain)}원
+                    이 거래 {gain >= 0 ? '+' : ''}{fmtKRW(gain)}원
                   </span>
-                  <span style={{ color: '#374151' }}>=</span>
-                  <span style={{ color: '#d1d5db', fontWeight: 600 }}>{fmtKRW(t.cash_after)}원</span>
-                </div>
-              )}
-
-              {prevCash != null && buyTotal != null && gain != null && t.cash_after != null && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px 6px', fontSize: 9, borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18`, flexWrap: 'wrap' }}>
-                  <span style={{ color: '#6b7280' }}>{fmtKRW(prevCash)}원</span>
                   <span style={{ color: '#374151' }}>→</span>
-                  <span style={{ color: '#4b8eda', fontWeight: 600 }}>-{fmtKRW(buyTotal)}원 매수</span>
-                  <span style={{ color: '#374151' }}>→</span>
-                  <span style={{ color: gain >= 0 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
-                    {gain >= 0 ? '+' : ''}{fmtKRW(gain)}원 청산
-                  </span>
-                  <span style={{ color: '#374151' }}>=</span>
-                  <span style={{ color: '#d1d5db', fontWeight: 600 }}>{fmtKRW(t.cash_after)}원</span>
+                  <span style={{ color: '#d1d5db', fontWeight: 600 }}>잔액 {fmtKRW(t.cash_after)}원</span>
                 </div>
               )}
             </div>
