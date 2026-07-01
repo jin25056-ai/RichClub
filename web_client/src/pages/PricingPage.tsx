@@ -457,10 +457,26 @@ export const PricingContent: React.FC<PricingContentProps> = ({ currentPlanId, o
             style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '28px 28px', width: 360, maxWidth: '90vw' }}
           >
             <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>플랜 변경 완료</div>
-            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 20, lineHeight: 1.7 }}>
+            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: successPlan.planId === 'telegram' ? 12 : 20, lineHeight: 1.7 }}>
               <span style={{ color: '#d1d5db', fontWeight: 600 }}>{successPlan.planName}</span> 플랜으로 변경되었습니다.<br />
               변경된 플랜이 즉시 적용됩니다.
             </div>
+            {successPlan.planId === 'telegram' && (
+              <div style={{ background: '#0d1f2e', border: '1px solid #1e3a5f', borderRadius: 6, padding: '10px 14px', marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: '#93c5fd', fontWeight: 600, marginBottom: 6 }}>텔레그램 봇 연결</div>
+                <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 10, lineHeight: 1.6 }}>
+                  아래 버튼을 눌러 텔레그램 봇에 접속한 뒤 /subscribe 명령어로 매수/매도 알림을 구독하세요.
+                </div>
+                <a
+                  href="https://t.me/richclub_ai_signal_bot"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ display: 'block', width: '100%', padding: '8px 0', background: '#1d4ed8', border: 'none', borderRadius: 6, color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', textAlign: 'center', textDecoration: 'none', boxSizing: 'border-box' }}
+                >
+                  @richclub_ai_signal_bot 열기
+                </a>
+              </div>
+            )}
             <button
               onClick={() => setSuccessPlan(null)}
               style={{ width: '100%', padding: '9px 0', background: '#6366f1', border: 'none', borderRadius: 6, color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
