@@ -46,19 +46,83 @@ export interface GlobalMarketResponse {
 }
 
 export interface TradeRecord {
+  stock_code?: string; stock_name?: string;
   buy_date: string; buy_price: number;
   sell_date: string | null; sell_price: number | null;
   return_pct: number | null; unrealized_pct: number | null;
 }
+
 export interface WinRateResult {
   signal: string; total_signals: number; win_count: number; lose_count: number;
   win_rate: number; avg_return_pct: number; max_return_pct: number;
   max_loss_pct: number; cumulative_return_pct: number;
   unrealized_pct: number | null; hold_days: number;
 }
+
 export interface WinRateResponse {
   stock_code: string | null; stock_name: string | null; period: string;
   results: WinRateResult[]; trades: TradeRecord[]; updated_at: string;
+}
+
+export interface HoldingItem {
+  stock_code: string; stock_name: string;
+  buy_date: string; buy_price: number;
+  current_price: number; unrealized_pct: number;
+}
+
+export interface PerformanceResponse {
+  model_id: string;
+  period: string;
+  year?: number;
+  win_rate: number;
+  cumulative_return_pct: number;
+  total_trades: number;
+  win_count: number;
+  lose_count: number;
+  avg_return_pct: number;
+  max_return_pct: number;
+  max_loss_pct: number;
+  holdings: HoldingItem[];
+  trades: TradeRecord[];
+  updated_at: string;
+}
+
+export interface SimYearResult {
+  year: number;
+  total_trades: number;
+  win_count: number;
+  lose_count: number;
+  win_rate: number;
+  avg_return_pct: number;
+  final_amount: number;
+  profit: number;
+  return_pct: number;
+}
+
+export interface SimulationResponse {
+  model_id: string;
+  principal: number;
+  max_stocks: number;
+  years: SimYearResult[];
+  total_final_amount: number;
+  total_profit: number;
+  total_return_pct: number;
+  updated_at: string;
+}
+
+export interface RecommendItem {
+  stock_code: string;
+  stock_name: string;
+  model_name: string;
+  pred_score: number;
+  close: number | null;
+}
+
+export interface RecommendResponse {
+  date: string;
+  total: number;
+  items: RecommendItem[];
+  updated_at: string;
 }
 
 export interface StockItem { stock_code: string; stock_name: string; }
@@ -86,6 +150,7 @@ export interface TradeLogItem {
   memo: string | null;
   traded_at: string;
 }
+
 export interface TradeLogCreate {
   stock_code: string;
   stock_name: string;
@@ -162,19 +227,32 @@ export const stockApi = {
 };
 
 export const marketApi = {
-  getGlobal: () => apiClient.get<GlobalMarketResponse>('/api/v1/market/global'),
+  getGlobal: () =>
+    apiClient.get<GlobalMarketResponse>('/api/v1/market/global'),
 
-  getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
+  getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string; model_id?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate', { params }),
 
-  getWinRateCombined: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
+  getWinRateCombined: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string; model_id?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/combined', { params }),
 
   getWinRateIndicator: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/indicator', { params }),
 
-  getWinRateSimple: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string }) =>
+  getWinRateSimple: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string; model_id?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate/simple', { params }),
+
+  getPerformance: (model_id: string, period?: string, year?: number) =>
+    apiClient.get<PerformanceResponse>(`/api/v1/market/performance/${model_id}`, { params: { period, year } }),
+
+  getSimulation: (model_id: string, principal: number, max_stocks: number, year?: number) =>
+    apiClient.get<SimulationResponse>(`/api/v1/market/simulation/${model_id}`, { params: { principal, max_stocks, year } }),
+
+  getSimulationDetail: (model_id: string, year: number, max_stocks: number) =>
+    apiClient.get<WinRateResponse>(`/api/v1/market/simulation-detail/${model_id}`, { params: { year, max_stocks } }),
+
+  getRecommend: (target_date?: string) =>
+    apiClient.get<RecommendResponse>('/api/v1/market/recommend', { params: { target_date } }),
 };
 
 export const watchlistApi = {

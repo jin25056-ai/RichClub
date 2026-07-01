@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { stockApi, watchlistApi, AIPredictionItem, WatchlistItem } from '../../api/stock';
+import { stockApi, marketApi, watchlistApi, AIPredictionItem, WatchlistItem, RecommendItem } from '../../api/stock';
 
-type RightTab = 'ai' | 'watchlist' | 'indicator' | 'news';
+type RightTab = 'ai' | 'recommend' | 'indicator' | 'watchlist' | 'news';
 
 const SIGNAL_COLOR: Record<string, string> = { 매수: '#16a34a', 매도: '#dc2626', 관망: '#d97706', '매수 우세': '#4ade80', '매도 우세': '#f87171', 중립: '#6b7280' };
 const SIGNAL_BG: Record<string, string>    = { 매수: '#14532d', 매도: '#7f1d1d', 관망: '#78350f', '매수 우세': '#14532d', '매도 우세': '#7f1d1d', 중립: '#1e1e2e' };
@@ -56,6 +56,10 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
   const [watchIds, setWatchIds] = useState<Record<string, string>>({});
   const [wLoading, setWLoading] = useState(false);
 
+  const [recItems, setRecItems] = useState<RecommendItem[]>([]);
+  const [recLoading, setRecLoading] = useState(false);
+  const [recDate, setRecDate] = useState<string>('');
+
   const fetchPredictions = (signal: '' | '매수' | '매도' | '관망') => {
     setLoading(true);
     stockApi.getPredictions(signal || undefined, 100, modelId)
@@ -75,12 +79,19 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
       .finally(() => setWLoading(false));
   }, []);
 
-  // 지표 탭은 AI 모델과 무관 - ju-model-v2 고정
   const fetchIndicators = useCallback((days: number) => {
     setIndLoading(true);
     stockApi.getTodaySignals(days, 'ju-model-v2')
       .then((res) => setIndItems(res.data))
       .finally(() => setIndLoading(false));
+  }, []);
+
+  const fetchRecommend = useCallback(() => {
+    setRecLoading(true);
+    marketApi.getRecommend()
+      .then((res) => { setRecItems(res.data.items); setRecDate(res.data.date); })
+      .catch(() => {})
+      .finally(() => setRecLoading(false));
   }, []);
 
   type NewsItem = { title: string; originallink: string; link: string; description: string; pubDate: string; };
@@ -104,6 +115,12 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
   const handleFilter = (s: '' | '매수' | '매도' | '관망') => {
     setFilter(s);
     fetchPredictions(s);
+  };
+
+  const handleTabChange = (t: RightTab) => {
+    setTab(t);
+    if (t === 'news' && newsItems.length === 0) fetchNews();
+    if (t === 'recommend' && recItems.length === 0) fetchRecommend();
   };
 
   const toggleWatch = async (e: React.MouseEvent, item: AIPredictionItem) => {
@@ -133,11 +150,8 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ display: 'flex', borderBottom: '1px solid #1e1e2e', flexShrink: 0 }}>
-        {(['ai', 'indicator', 'watchlist', 'news'] as RightTab[]).map((t) => (
-          <button key={t} onClick={() => {
-            setTab(t);
-            if (t === 'news' && newsItems.length === 0) fetchNews();
-          }}
+        {(['ai', 'recommend', 'indicator', 'watchlist', 'news'] as RightTab[]).map((t) => (
+          <button key={t} onClick={() => handleTabChange(t)}
             style={{
               flex: 1, padding: '7px 0', fontSize: 10, border: 'none', cursor: 'pointer',
               background: 'transparent',
@@ -145,7 +159,7 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
               fontWeight: tab === t ? 600 : 400,
               borderBottom: tab === t ? '2px solid #6366f1' : '2px solid transparent',
             }}>
-            {t === 'ai' ? 'AI' : t === 'indicator' ? '지표' : t === 'watchlist' ? '관심' : '뉴스'}
+            {t === 'ai' ? 'AI' : t === 'recommend' ? '추천' : t === 'indicator' ? '지표' : t === 'watchlist' ? '관심' : '뉴스'}
           </button>
         ))}
       </div>
@@ -225,6 +239,68 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
         </div>
       )}
 
+      {tab === 'recommend' && (
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', gap: 4, padding: '6px 8px', borderBottom: '1px solid #1e1e2e', alignItems: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: 9, color: '#4b5563', flex: 1 }}>KOSPI200 + KOSDAQ150 · seo-model-v2 · {recDate}</span>
+            <button onClick={fetchRecommend}
+              style={{ fontSize: 9, padding: '2px 5px', borderRadius: 3, border: '1px solid #2d2d3d', background: 'transparent', color: '#555', cursor: 'pointer' }}>
+              갱신
+            </button>
+          </div>
+          {recLoading ? (
+            <div style={{ padding: 20, fontSize: 11, color: '#666', textAlign: 'center' }}>불러오는 중...</div>
+          ) : recItems.length === 0 ? (
+            <div style={{ padding: 20, fontSize: 11, color: '#4b5563', textAlign: 'center', marginTop: 20 }}>
+              추천 종목이 없습니다.
+            </div>
+          ) : (
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {recItems.map((item, i) => {
+                const isActive = selectedCode === item.stock_code;
+                const isReg = item.model_name === 'lgb_regressor';
+                return (
+                  <div key={`${item.stock_code}-${i}`}
+                    onClick={() => onSelectStock(item.stock_code, item.stock_name)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '5px 8px', cursor: 'pointer', borderBottom: '1px solid #13131e',
+                      background: isActive ? '#1a1a30' : 'transparent',
+                    }}
+                    onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#151525'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? '#1a1a30' : 'transparent'; }}
+                  >
+                    <span style={{
+                      width: 28, textAlign: 'center', fontSize: 8, padding: '1px 2px', borderRadius: 3, flexShrink: 0,
+                      background: isReg ? '#1e3a5f' : '#14532d', color: isReg ? '#93c5fd' : '#4ade80', fontWeight: 700,
+                    }}>
+                      {isReg ? 'REG' : 'CLF'}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 11, color: isActive ? '#a5b4fc' : '#d1d5db',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        fontWeight: isActive ? 600 : 400,
+                      }}>
+                        {item.stock_name}
+                      </div>
+                      <div style={{ fontSize: 9, color: '#4b5563' }}>
+                        {item.stock_code} · score {item.pred_score.toFixed(4)}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 10, color: '#9ca3af' }}>
+                        {item.close != null ? fmtPrice(item.close) : '-'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 지표 탭 - AI 모델과 무관, ju-model-v2 고정 */}
       {tab === 'indicator' && (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
@@ -248,18 +324,6 @@ const RightPanel: React.FC<Props> = ({ onSelectStock, selectedCode, onWatchChang
             <div style={{ overflowY: 'auto', flex: 1 }}>
               {indItems.map((it) => {
                 const isActive = selectedCode === it.stock_code;
-                const SIGNAL_COLORS: Record<string, { color: string; bg: string }> = {
-                  '강한 매수': { color: '#4ade80', bg: '#14532d' },
-                  'MA60 턴':   { color: '#f0abfc', bg: '#4a044e' },
-                  '골든보':    { color: '#f0abfc', bg: '#581c87' },
-                  '매수 우세': { color: '#86efac', bg: '#166534' },
-                  '음봉 주의': { color: '#fbbf24', bg: '#78350f' },
-                  '중립':      { color: '#9ca3af', bg: '#1f2937' },
-                  '매도 우세': { color: '#fca5a5', bg: '#7f1d1d' },
-                  '강한 매도': { color: '#f87171', bg: '#991b1b' },
-                  '침체(MA60)': { color: '#6b7280', bg: '#111827' },
-                  '침체(일목)': { color: '#6b7280', bg: '#111827' },
-                };
                 const fmtClose = it.close
                   ? it.close >= 1000000 ? `${(it.close/1000000).toFixed(1)}M`
                     : it.close >= 1000 ? `${Math.round(it.close/1000)}K`

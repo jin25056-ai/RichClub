@@ -14,7 +14,13 @@ ALL_MODELS = [
     {
         "id": "seo-model-v1",
         "name": "seo-model-v1",
-        "description": "고성능 AI 예측 모델",
+        "description": "고성능 AI 예측 모델 v1",
+        "required_plan": ["seo-model", "auto-trade"],
+    },
+    {
+        "id": "seo-model-v2",
+        "name": "seo-model-v2",
+        "description": "고성능 AI 예측 모델 v2",
         "required_plan": ["seo-model", "auto-trade"],
     },
 ]
