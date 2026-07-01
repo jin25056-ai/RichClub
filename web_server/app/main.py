@@ -1,9 +1,10 @@
 import logging
+import os
 from contextlib import asynccontextmanager
-from os import getenv
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ASCENDING
 
 from app.api.router import router
@@ -19,13 +20,13 @@ ALLOWED_ORIGINS = [
     "https://rich-club-front-end.vercel.app",
     "https://richclub-client.efforthye.dev",
     "https://richclub.mayo.im",
-    *(getenv("ALLOWED_ORIGINS", "").split(",") if getenv("ALLOWED_ORIGINS") else []),
+    *(os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else []),
 ]
 
 
 async def _ensure_indexes() -> None:
     db = get_db()
-    await db.users.create_index([(("email", ASCENDING))], unique=True, name="idx_users_email")
+    await db.users.create_index([("email", ASCENDING)], unique=True, name="idx_users_email")
     logger.info("[MongoDB] 인덱스 설정 완료")
 
 
@@ -53,6 +54,13 @@ async def lifespan(app: FastAPI):
     await _ensure_indexes()
     logger.info("MongoDB 연결 완료")
     start_scheduler()
+
+    # 텔레그램 webhook 등록 (환경변수 설정 시)
+    webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "")
+    if webhook_url:
+        from app.utils.telegram import set_webhook
+        await set_webhook(f"{webhook_url}/telegram/webhook")
+
     yield
     stop_scheduler()
     await close_db()
@@ -77,6 +85,22 @@ app.add_middleware(
 app.include_router(router)
 
 
+def _db() -> AsyncIOMotorDatabase:
+    return get_db()
+
+
 @app.get("/health", tags=["health"])
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/telegram/webhook", tags=["telegram"])
+async def telegram_webhook(
+    request: Request,
+    db: AsyncIOMotorDatabase = Depends(_db),
+):
+    """텔레그램 webhook 수신 엔드포인트."""
+    update = await request.json()
+    from app.utils.telegram import handle_command
+    await handle_command(update, db)
+    return {"ok": True}

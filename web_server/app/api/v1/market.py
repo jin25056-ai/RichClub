@@ -955,6 +955,153 @@ async def get_simulation_detail(
     )
 
 
+_INDEX_CODES_CACHE: dict = {"codes": None, "ts": 0}
+_INDEX_CACHE_TTL = 3600
+
+
+def _load_index_codes() -> set:
+    """KOSPI200 + KOSDAQ150 종목코드 로드 (1시간 캐시)."""
+    now = time.time()
+    if _INDEX_CODES_CACHE["codes"] is not None and (now - _INDEX_CODES_CACHE["ts"]) < _INDEX_CACHE_TTL:
+        return _INDEX_CODES_CACHE["codes"]
+
+    import pandas as pd
+
+    codes: set = set()
+    base_dir = "/app/collect_data/seojin"
+    for filename in ["KOSPI200.csv", "KOSDAQ150.csv"]:
+        path = f"{base_dir}/{filename}"
+        try:
+            df = pd.read_csv(path, encoding="cp949", dtype=str)
+            if len(df.columns) == 1 and "," in df.columns[0]:
+                col = df.columns[0]
+                df[["stk_cd", "_"]] = df[col].str.split(",", n=1, expand=True)
+            else:
+                code_col = next(
+                    (c for c in df.columns if c in ["stk_cd", "ticker", "code", "종목코드", "단축코드"]),
+                    df.columns[0]
+                )
+                df["stk_cd"] = df[code_col].astype(str)
+            df["stk_cd"] = df["stk_cd"].str.replace(".0", "", regex=False).str.strip().str.zfill(6)
+            codes.update(df["stk_cd"].tolist())
+        except Exception as e:
+            import logging as _log
+            _log.getLogger(__name__).warning(f"[recommend] {filename} 로드 실패: {e}")
+
+    _INDEX_CODES_CACHE["codes"] = codes
+    _INDEX_CODES_CACHE["ts"] = now
+    return codes
+
+
+class RecommendItem(BaseModel):
+    stock_code: str
+    stock_name: str
+    model_name: str
+    pred_score: float
+    close: Optional[float]
+    market_group: Optional[str] = None
+
+
+class RecommendResponse(BaseModel):
+    date: str
+    total: int
+    items: List[RecommendItem]
+    updated_at: datetime
+
+
+@router.get("/recommend", response_model=RecommendResponse, summary="AI 추천 종목 (KOSPI200+KOSDAQ150 기준)")
+async def get_recommend(
+    target_date: Optional[str] = Query(None, description="조회 날짜 (YYYY-MM-DD, 기본: 오늘)"),
+    db: AsyncIOMotorDatabase = Depends(_db),
+    _: dict = Depends(get_current_user),
+):
+    """
+    방금 준 combotest 스크립트와 동일한 조건으로 추천 종목 추출.
+
+    - 대상: KOSPI200 + KOSDAQ150 종목만
+    - seo-model-v2 lgb_classifier / xgb_classifier: pred_score > 0.70 + target != 3 + above_max_volume_profile == 1
+    - seo-model-v2 lgb_regressor: reg_score > 0.05 + target != 3 + above_max_volume_profile == 1
+    - 결과: pred_score (또는 reg_score) 내림차순 정렬
+    """
+    if target_date:
+        try:
+            dt = datetime.strptime(target_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="날짜 형식은 YYYY-MM-DD")
+    else:
+        dt = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    since = dt.replace(tzinfo=timezone.utc)
+    until = since + timedelta(days=1)
+
+    index_codes = _load_index_codes()
+    if not index_codes:
+        raise HTTPException(status_code=503, detail="KOSPI200/KOSDAQ150 종목 목록 로드 실패")
+
+    # 해당 날짜의 seo-model-v2 데이터 조회
+    docs = [doc async for doc in db.total_trading_signals.find(
+        {
+            "model_id": "seo-model-v2",
+            "predicted_at": {"$gte": since, "$lt": until},
+            "stock_code": {"$in": list(index_codes)},
+        },
+        projection={
+            "stock_code": 1, "stock_name": 1,
+            "pred_score": 1, "reg_score": 1,
+            "target": 1, "above_max_volume_profile": 1, "close": 1,
+        }
+    )]
+
+    items: list = []
+    for doc in docs:
+        code = doc.get("stock_code", "")
+        name = doc.get("stock_name", code)
+        pred_score = doc.get("pred_score")
+        reg_score = doc.get("reg_score")
+        target = doc.get("target")
+        vp = doc.get("above_max_volume_profile")
+        close = doc.get("close")
+
+        if target is not None and int(target) == 3:
+            continue
+        if vp is not None and int(vp) != 1:
+            continue
+
+        # classifier 조건: pred_score > 0.70
+        if pred_score is not None and float(pred_score) > 0.70:
+            items.append(RecommendItem(
+                stock_code=code, stock_name=name,
+                model_name="lgb_classifier+xgb_classifier",
+                pred_score=round(float(pred_score), 4),
+                close=close,
+            ))
+
+        # regressor 조건: reg_score > 0.05
+        if reg_score is not None and float(reg_score) > 0.05:
+            items.append(RecommendItem(
+                stock_code=code, stock_name=name,
+                model_name="lgb_regressor",
+                pred_score=round(float(reg_score), 6),
+                close=close,
+            ))
+
+    # 중복 종목 처리: 같은 종목이 classifier+regressor 둘 다 조건 만족하면 reg_score 우선 (더 높은 score 기준)
+    seen: dict = {}
+    for item in items:
+        key = item.stock_code
+        if key not in seen or item.pred_score > seen[key].pred_score:
+            seen[key] = item
+
+    result = sorted(seen.values(), key=lambda x: x.pred_score, reverse=True)
+
+    return RecommendResponse(
+        date=since.strftime("%Y-%m-%d"),
+        total=len(result),
+        items=result,
+        updated_at=datetime.now(timezone.utc),
+    )
+
+
 @router.get("/winrate", response_model=WinRateResponse, summary="승률 테스트 (AI) - 침체구간 제외")
 async def get_win_rate(
     stock_code: Optional[str] = Query(None),
