@@ -110,6 +110,21 @@ export interface SimulationResponse {
   updated_at: string;
 }
 
+export interface RecommendItem {
+  stock_code: string;
+  stock_name: string;
+  model_name: string;
+  pred_score: number;
+  close: number | null;
+}
+
+export interface RecommendResponse {
+  date: string;
+  total: number;
+  items: RecommendItem[];
+  updated_at: string;
+}
+
 export interface StockItem { stock_code: string; stock_name: string; }
 export interface StockSearchResult { stock_code: string; stock_name: string; }
 
@@ -212,7 +227,8 @@ export const stockApi = {
 };
 
 export const marketApi = {
-  getGlobal: () => apiClient.get<GlobalMarketResponse>('/api/v1/market/global'),
+  getGlobal: () =>
+    apiClient.get<GlobalMarketResponse>('/api/v1/market/global'),
 
   getWinRate: (params?: { stock_code?: string; period?: string; hold_days?: number; start_date?: string; end_date?: string; model_id?: string }) =>
     apiClient.get<WinRateResponse>('/api/v1/market/winrate', { params }),
@@ -231,6 +247,12 @@ export const marketApi = {
 
   getSimulation: (model_id: string, principal: number, max_stocks: number, year?: number) =>
     apiClient.get<SimulationResponse>(`/api/v1/market/simulation/${model_id}`, { params: { principal, max_stocks, year } }),
+
+  getSimulationDetail: (model_id: string, year: number, max_stocks: number) =>
+    apiClient.get<WinRateResponse>(`/api/v1/market/simulation-detail/${model_id}`, { params: { year, max_stocks } }),
+
+  getRecommend: (target_date?: string) =>
+    apiClient.get<RecommendResponse>('/api/v1/market/recommend', { params: { target_date } }),
 };
 
 export const watchlistApi = {

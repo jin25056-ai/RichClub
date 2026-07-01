@@ -80,6 +80,15 @@ def _build_features_for_predict(raw: pd.DataFrame, market_map: dict, stock_name:
     df['stoch_k_change'] = df['stoch_k'].diff()
     df['sp500_ma_ratio'] = df['sp500'] / df['sp500_ma20']
 
+    # RSI 계산 (14일)
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(com=13, adjust=False).mean()
+    avg_loss = loss.ewm(com=13, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    df['rsi'] = 100 - (100 / (1 + rs))
+
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     return df
 
@@ -125,6 +134,7 @@ async def _upsert_signal(col, name, code, dt, row, model):
         'high': _safe(row.get('high')), 'low': _safe(row.get('low')),
         'volume': _safe(row.get('volume')),
         'signal': signal, 'signal_label': pred_label,
+        'rsi': _safe(row.get('rsi')),
         'macd': _safe(row.get('macd')),
         'stoch_k': _safe(row.get('stoch_k')), 'stoch_d': _safe(row.get('stoch_d')),
         'ma5': _safe(row.get('ma5')), 'ma20': _safe(row.get('ma20')), 'ma60': _safe(row.get('ma60')),
