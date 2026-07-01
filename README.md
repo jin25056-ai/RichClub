@@ -182,6 +182,24 @@ POST /telegram/webhook
 ```
 서버 시작 시 `TELEGRAM_WEBHOOK_URL/telegram/webhook`으로 자동 등록됩니다.
 
+### 수동 알림 전송 (테스트용)
+
+```bash
+docker exec richclub-api python3 -c "
+import asyncio
+from app.utils.telegram import notify_signals
+
+async def main():
+    signals = [
+        {'stock_code': '005930', 'stock_name': '삼성전자', 'signal': '매수', 'close': 334000},
+        {'stock_code': '000270', 'stock_name': '기아', 'signal': '매도', 'close': 138000},
+    ]
+    await notify_signals('seo-model-v2', signals)
+
+asyncio.run(main())
+"
+```
+
 ---
 
 ## MLOps 대시보드
