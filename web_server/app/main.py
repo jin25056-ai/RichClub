@@ -70,7 +70,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="RichClub API",
     version="0.1.0",
-    description="RichClub 백엔드 API 서버",
+    description="""
+## RichClub AI - 주식 AI 분석 플랫폼
+
+**본 서비스는 개발 포트폴리오 데모 프로젝트입니다.**
+
+- AI 예측 결과는 참고용이며 실제 투자 조언이 아닙니다.
+- 본 서비스는 투자자문업 등록 또는 유사투자자문업 신고를 하지 않은 데모 서비스입니다.
+- 투자 결정은 본인 판단과 책임 하에 신중하게 내리시기 바랍니다.
+- 과거 AI 예측 성과가 미래 수익을 보장하지 않습니다.
+
+> This is a portfolio demo project. AI predictions are for reference only and do not constitute investment advice.
+    """,
     lifespan=lifespan,
 )
 

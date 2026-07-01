@@ -54,7 +54,7 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({ user, onLogout, onPri
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen((v: boolean) => !v)}
         style={{ fontSize: 10, padding: '3px 8px', background: open ? '#1e1e2e' : 'transparent', color: '#9ca3af', border: '1px solid #2d2d3d', borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
       >
         <span style={{ fontSize: 9, color: '#4b5563' }}>&#9679;</span>
@@ -106,6 +106,10 @@ const ExamplePage: React.FC = () => {
   const [currentPrice, setCurrentPrice] = useState<number | undefined>(undefined);
   const [user, setUser] = useState<User | null>(null);
 
+  const checkWatch = useCallback((code: string) => {
+    watchlistApi.check(code).then((res) => setWatchId(res.data.is_watching ? res.data.id : null)).catch(() => setWatchId(null));
+  }, []);
+
   useEffect(() => {
     if (!localStorage.getItem('access_token')) { navigate('/auth'); return; }
     getMe().then(setUser).catch(() => {});
@@ -114,8 +118,27 @@ const ExamplePage: React.FC = () => {
     if (code) {
       stockApi.search(code).then((res) => {
         const found = res.data.find((s: any) => s.stock_code === code);
-        if (found) { setSelectedStock({ code: found.stock_code, name: found.stock_name }); setCurrentName(found.stock_name); checkWatch(found.stock_code); }
-      }).catch(() => {});
+        if (found) {
+          setSelectedStock({ code: found.stock_code, name: found.stock_name });
+          setCurrentName(found.stock_name);
+          checkWatch(found.stock_code);
+        } else {
+          stockApi.getPrice(code).then((r) => {
+            const name = r.data.stock_name || code;
+            setSelectedStock({ code, name });
+            setCurrentName(name);
+            checkWatch(code);
+          }).catch(() => {
+            setSelectedStock({ code, name: code });
+            setCurrentName(code);
+            checkWatch(code);
+          });
+        }
+      }).catch(() => {
+        setSelectedStock({ code, name: code });
+        setCurrentName(code);
+        checkWatch(code);
+      });
     } else {
       stockApi.getPredictions('매수', 1).then((res) => {
         if (res.data.length > 0) { const first = res.data[0]; setSelectedStock({ code: first.stock_code, name: first.stock_name }); setCurrentName(first.stock_name); }
@@ -127,10 +150,6 @@ const ExamplePage: React.FC = () => {
     const onResize = () => setMobile(isMobile());
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  const checkWatch = useCallback((code: string) => {
-    watchlistApi.check(code).then((res) => setWatchId(res.data.is_watching ? res.data.id : null)).catch(() => setWatchId(null));
   }, []);
 
   const handleSelectStock = (code: string, name: string) => {
@@ -159,8 +178,14 @@ const ExamplePage: React.FC = () => {
 
   const intervalToggle = null;
 
+  const disclaimer = (
+    <div style={{ background: '#1a1a2e', border: '1px solid #2d1f3d', borderRadius: 6, padding: '6px 10px', marginBottom: 6, fontSize: 9, color: '#6b5c8a', lineHeight: 1.5 }}>
+      본 서비스는 <strong style={{ color: '#7c6b9e' }}>개발 포트폴리오 데모 프로젝트</strong>입니다. AI 예측 결과는 참고용이며 실제 투자 조언이 아닙니다. 투자 결정은 본인 판단과 책임 하에 신중하게 내리시기 바랍니다.
+    </div>
+  );
+
   const header = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexShrink: 0, flexWrap: 'wrap' }}>
       <h1 style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', margin: 0, flexShrink: 0 }}>RichClub AI</h1>
       <StockSearchSection initialStock={selectedStock} onStockChange={handleSelectStock} searchOnly />
       {!mobile && (['1m', '3m', '6m'] as Period[]).map((p) => (
@@ -211,7 +236,7 @@ const ExamplePage: React.FC = () => {
             &#x2715;
           </button>
         </div>
-        <PricingContent currentPlanId={user?.plan} onPlanChanged={(newPlan) => setUser((u) => u ? { ...u, plan: newPlan } : u)} />
+        <PricingContent currentPlanId={user?.plan} onPlanChanged={(newPlan) => setUser((u: User | null) => u ? { ...u, plan: newPlan } : u)} />
       </div>
     </div>
   ) : null;
@@ -219,7 +244,10 @@ const ExamplePage: React.FC = () => {
   if (mobile) {
     return (
       <div style={{ background: '#0a0a14', minHeight: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}>
-        <div style={{ padding: '10px 12px 0', flexShrink: 0 }}>{header}</div>
+        <div style={{ padding: '10px 12px 0', flexShrink: 0 }}>
+          {header}
+          {disclaimer}
+        </div>
         {activeTab === 'chart' && (
           <div style={{ display: 'flex', gap: 6, padding: '0 12px 8px', alignItems: 'center' }}>
             {(['1m', '3m', '6m'] as Period[]).map((p) => (
@@ -231,7 +259,7 @@ const ExamplePage: React.FC = () => {
         )}
         <div style={{ flex: 1, padding: '0 12px', overflow: 'hidden' }}>
           {activeTab === 'chart' && (
-            <div style={{ ...panel, height: 'calc(100vh - 130px)', overflow: 'hidden' }}>
+            <div style={{ ...panel, height: 'calc(100vh - 150px)', overflow: 'hidden' }}>
               <StockSearchSection key={selectedModel} initialStock={selectedStock} onStockChange={handleSelectStock} chartOnly period={period} sellMode={sellMode} chartInterval={chartInterval} modelId={selectedModel} />
             </div>
           )}
@@ -270,6 +298,7 @@ const ExamplePage: React.FC = () => {
   return (
     <div style={{ background: '#0a0a14', height: '100vh', overflow: 'hidden', padding: '10px 14px', fontFamily: 'inherit', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
       {header}
+      {disclaimer}
       <TradeModal isOpen={tradeModalOpen} onClose={() => setTradeModalOpen(false)} initialStockCode={selectedStock?.code} initialStockName={selectedStock?.name} initialPrice={currentPrice} />
       {pricingModal}
       <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
