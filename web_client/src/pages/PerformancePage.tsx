@@ -136,7 +136,13 @@ const YearDetailInline: React.FC<{
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>{pctStr(t.return_pct ?? 0)}</div>
               </div>
-              {/* 잔액 흐름: 잔액 N원 → 이 거래 ±gain원 → 잔액 M원 */}
+              {/* 청산 후 현금 잔액만 표시 */}
+              {t.cash_after != null && (
+                <div style={{ padding: '3px 12px 6px', fontSize: 9, borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18`, color: '#4b5563' }}>
+                  현금 잔액 <span style={{ color: '#d1d5db', fontWeight: 600 }}>{fmtKRW(t.cash_after)}원</span>
+                </div>
+              )}
+
               {prevCash != null && gain != null && t.cash_after != null && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 12px 6px', fontSize: 9, borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18` }}>
                   <span style={{ color: '#4b5563' }}>잔액 {fmtKRW(prevCash)}원</span>
