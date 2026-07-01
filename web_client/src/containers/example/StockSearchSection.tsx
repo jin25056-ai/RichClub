@@ -707,6 +707,28 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
         const ma20arr = calcMA(sorted, 20);
         const ma60arr = calcMA(sorted, 60);
         const ichimokuRaw = calcIchimoku(sorted);
+
+        // RSI 직접 계산 (DB rsi 필드 없거나 None인 경우 대비)
+        const closesForRsi = sorted.map((d: any) => d.close).filter((v: any) => v != null) as number[];
+        const rsiCalc: (number | null)[] = new Array(sorted.length).fill(null);
+        if (closesForRsi.length >= 15) {
+          const win = 14;
+          let avgGain = 0; let avgLoss = 0;
+          for (let i = 1; i <= win; i++) {
+            const diff = closesForRsi[i] - closesForRsi[i - 1];
+            avgGain += Math.max(diff, 0); avgLoss += Math.max(-diff, 0);
+          }
+          avgGain /= win; avgLoss /= win;
+          for (let i = win; i < closesForRsi.length; i++) {
+            if (i > win) {
+              const diff = closesForRsi[i] - closesForRsi[i - 1];
+              avgGain = (avgGain * (win - 1) + Math.max(diff, 0)) / win;
+              avgLoss = (avgLoss * (win - 1) + Math.max(-diff, 0)) / win;
+            }
+            const rs = avgLoss === 0 ? Infinity : avgGain / avgLoss;
+            rsiCalc[i] = Math.round((100 - 100 / (1 + rs)) * 100) / 100;
+          }
+        }
         const cutDate = new Date();
         cutDate.setDate(cutDate.getDate() - displayDays);
         const cutStr = cutDate.toISOString().slice(0, 10);
@@ -714,6 +736,7 @@ const StockSearchSection: React.FC<Props> = ({ initialStock, onStockChange, sear
           const shiftedIdx = i - ICHIMOKU_SHIFT;
           return {
             ...d,
+            rsi: d.rsi != null ? d.rsi : rsiCalc[i],
             ma5: ma5arr[i], ma20: ma20arr[i], ma60: ma60arr[i],
             tenkan: ichimokuRaw[i].tenkan,
             kijun:  ichimokuRaw[i].kijun,
