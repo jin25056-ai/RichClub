@@ -137,7 +137,21 @@ const YearDetailInline: React.FC<{
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>{pctStr(t.return_pct ?? 0)}</div>
               </div>
-              {/* 잔액 흐름: 이전잔액 → 매수(-투자금) → 청산(+수익) = 현재잔액 */}
+              {/* 잔액 흐름: 이전잔액 → 투자 → 수익 → 쟘액 */}
+              {prevCash != null && buyTotal != null && gain != null && t.cash_after != null && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px 6px', fontSize: 9, borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18`, flexWrap: 'wrap' }}>
+                  <span style={{ color: '#6b7280' }}>{fmtKRW(prevCash)}원</span>
+                  <span style={{ color: '#374151' }}>→</span>
+                  <span style={{ color: '#4b8eda', fontWeight: 600 }}>투자 -{fmtKRW(buyTotal)}원</span>
+                  <span style={{ color: '#374151' }}>→</span>
+                  <span style={{ color: gain >= 0 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
+                    수익 {gain >= 0 ? '+' : ''}{fmtKRW(gain)}원
+                  </span>
+                  <span style={{ color: '#374151' }}>=</span>
+                  <span style={{ color: '#d1d5db', fontWeight: 600 }}>{fmtKRW(t.cash_after)}원</span>
+                </div>
+              )}
+
               {prevCash != null && buyTotal != null && gain != null && t.cash_after != null && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px 6px', fontSize: 9, borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18`, flexWrap: 'wrap' }}>
                   <span style={{ color: '#6b7280' }}>{fmtKRW(prevCash)}원</span>
