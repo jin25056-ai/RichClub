@@ -587,6 +587,41 @@ async def get_macd(
     return MACDResponse(stock_code=stock_code, stock_name=stock_name, period=period, data=data)
 
 
+def _fetch_candle_from_yfinance(ticker_code: str, fetch_days: int = 365) -> List[CandleDataPoint]:
+    """yfinance에서 캔들 데이터 수집 후 반환."""
+    ticker = ticker_code + ".KS"
+    start_str = (datetime.utcnow() - timedelta(days=fetch_days + 70)).strftime("%Y-%m-%d")
+    end_str = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    raw = yf.download(ticker, start=start_str, end=end_str, interval="1d", progress=False, auto_adjust=True)
+    if raw.empty:
+        return []
+    if isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = raw.columns.get_level_values(0)
+    raw.columns = [c.lower() for c in raw.columns]
+    raw = raw.rename(columns={"adj close": "close"})
+    raw.index = pd.to_datetime(raw.index)
+    raw = raw.dropna(subset=["close"])
+    close_s = raw["close"]
+    ma5 = close_s.rolling(5).mean()
+    ma20 = close_s.rolling(20).mean()
+    ma60 = close_s.rolling(60).mean()
+    result = []
+    for dt, row in raw.iterrows():
+        result.append(CandleDataPoint(
+            datetime=dt.strftime("%Y-%m-%d"),
+            open=_safe_float(row.get("open")),
+            high=_safe_float(row.get("high")),
+            low=_safe_float(row.get("low")),
+            close=_safe_float(row.get("close")),
+            volume=_safe_float(row.get("volume")),
+            ma5=_safe_float(ma5.get(dt)),
+            ma20=_safe_float(ma20.get(dt)),
+            ma60=_safe_float(ma60.get(dt)),
+        ))
+    return result
+
+
 @router.get("/chart/candle/{stock_code}", response_model=CandleResponse, summary="캔들 차트 데이터")
 async def get_candles(
     stock_code: str,
@@ -606,72 +641,53 @@ async def get_candles(
     ).sort("predicted_at", 1)
     docs = [doc async for doc in cursor]
 
+    # DB 데이터가 있고 최신 날짜가 3일 이내면 DB 데이터 반환
     if docs:
-        data = []
-        for d in docs:
-            dt = d["predicted_at"]
-            dt_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
-            data.append(CandleDataPoint(
-                datetime=dt_str,
-                open=d.get("open"), high=d.get("high"),
-                low=d.get("low"), close=d.get("close"), volume=d.get("volume"),
-                ma5=round(float(d["ma5"]), 0) if d.get("ma5") else None,
-                ma20=round(float(d["ma20"]), 0) if d.get("ma20") else None,
-                ma60=round(float(d["ma60"]), 0) if d.get("ma60") else None,
-            ))
-        return CandleResponse(stock_code=stock_code, interval="1d", data=data)
+        last_dt = docs[-1]["predicted_at"]
+        last_dt_naive = last_dt.replace(tzinfo=None) if hasattr(last_dt, "replace") else last_dt
+        is_stale = (datetime.utcnow() - last_dt_naive).days >= 3
 
-    # DB 데이터 없으면 yfinance 직접 수집
-    if _is_code(stock_code):
-        ticker_code = stock_code
-    else:
+        if not is_stale:
+            data = []
+            for d in docs:
+                dt = d["predicted_at"]
+                dt_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
+                data.append(CandleDataPoint(
+                    datetime=dt_str,
+                    open=d.get("open"), high=d.get("high"),
+                    low=d.get("low"), close=d.get("close"), volume=d.get("volume"),
+                    ma5=round(float(d["ma5"]), 0) if d.get("ma5") else None,
+                    ma20=round(float(d["ma20"]), 0) if d.get("ma20") else None,
+                    ma60=round(float(d["ma60"]), 0) if d.get("ma60") else None,
+                ))
+            return CandleResponse(stock_code=stock_code, interval="1d", data=data)
+
+        # 오래된 데이터 -> 종목코드 확보 후 yfinance 폴백
+        if not _is_code(stock_code):
+            doc_info2 = await db.total_trading_signals.find_one(
+                {"stock_name": stock_code}, {"stock_code": 1}
+            )
+            if doc_info2:
+                stock_code = doc_info2.get("stock_code", stock_code)
+
+    # DB 데이터 없거나 오래됐으면 yfinance 직접 수집
+    if not _is_code(stock_code):
         doc_info = await db.total_trading_signals.find_one(
             {"stock_name": stock_code}, {"stock_code": 1}
         )
         ticker_code = doc_info.get("stock_code", "") if doc_info else ""
         if not _is_code(ticker_code):
             raise HTTPException(status_code=404, detail="해당 종목 데이터가 없습니다.")
+    else:
+        ticker_code = stock_code
 
     fetch_days = days if days > 0 else 365
-    ticker = ticker_code + ".KS"
-    start_str = (datetime.utcnow() - timedelta(days=fetch_days + 70)).strftime("%Y-%m-%d")
-    end_str = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
-    cutoff = datetime.utcnow() - timedelta(days=fetch_days) if days > 0 else None
-
-    def _fetch():
-        raw = yf.download(ticker, start=start_str, end=end_str, interval="1d", progress=False, auto_adjust=True)
-        if raw.empty:
-            return []
-        if isinstance(raw.columns, pd.MultiIndex):
-            raw.columns = raw.columns.get_level_values(0)
-        raw.columns = [c.lower() for c in raw.columns]
-        raw = raw.rename(columns={"adj close": "close"})
-        raw.index = pd.to_datetime(raw.index)
-        raw = raw.dropna(subset=["close"])
-        close = raw["close"]
-        ma5 = close.rolling(5).mean()
-        ma20 = close.rolling(20).mean()
-        ma60 = close.rolling(60).mean()
-        result = []
-        for dt, row in raw.iterrows():
-            if cutoff and dt.replace(tzinfo=None) < cutoff:
-                continue
-            result.append(CandleDataPoint(
-                datetime=dt.strftime("%Y-%m-%d"),
-                open=_safe_float(row.get("open")),
-                high=_safe_float(row.get("high")),
-                low=_safe_float(row.get("low")),
-                close=_safe_float(row.get("close")),
-                volume=_safe_float(row.get("volume")),
-                ma5=_safe_float(ma5.get(dt)),
-                ma20=_safe_float(ma20.get(dt)),
-                ma60=_safe_float(ma60.get(dt)),
-            ))
-        return result
 
     try:
         loop = asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, functools.partial(_fetch))
+        data = await loop.run_in_executor(
+            None, functools.partial(_fetch_candle_from_yfinance, ticker_code, fetch_days)
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"yfinance 수집 실패: {str(e)}")
 
