@@ -78,7 +78,6 @@ const YearDetailInline: React.FC<{
   const detailMin = completedRets.length ? Math.min(...completedRets) : 0;
 
   const hasCashFlow = completed.some((t) => t.cash_after != null) && principalNum !== undefined;
-  const cashFlowItems = completed.filter((t) => t.cash_after != null);
 
   if (loading) return <div style={{ textAlign: 'center', padding: '30px 0', color: '#4b5563' }}>불러오는 중...</div>;
   if (!data) return <div style={{ textAlign: 'center', padding: '30px 0', color: '#4b5563' }}>데이터 없음</div>;
@@ -100,39 +99,7 @@ const YearDetailInline: React.FC<{
         ))}
       </div>
 
-      {/* 잔액 흐름 바: 초기 → 거래별 청산 후 잔액 */}
-      {hasCashFlow && (
-        <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
-          <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 8 }}>잔액 흐름</div>
-          <div style={{ display: 'flex', alignItems: 'center', overflowX: 'auto', paddingBottom: 2 }}>
-            {/* 초기 */}
-            <div style={{ textAlign: 'center', flexShrink: 0 }}>
-              <div style={{ fontSize: 8, color: '#4b5563', marginBottom: 3 }}>초기</div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: '#6b7280', background: '#1a1a2e', borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap' }}>
-                {fmtKRW(principalNum!)}원
-              </div>
-            </div>
-            {/* 각 청산 후 잔액 */}
-            {cashFlowItems.map((t, i) => {
-              const prev = i === 0 ? principalNum! : (cashFlowItems[i - 1].cash_after ?? principalNum!);
-              const diff = (t.cash_after ?? 0) - prev;
-              return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                  <div style={{ width: 20, height: 1, background: diff >= 0 ? '#16a34a55' : '#dc262655' }} />
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 8, color: '#4b5563', marginBottom: 3 }}>{t.sell_date?.slice(5)}</div>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: diff >= 0 ? '#16a34a' : '#dc2626', background: '#1a1a2e', borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap' }}>
-                      {fmtKRW(t.cash_after ?? 0)}원
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* 헤더: 완료 거래 건수(좌) + 종목당 투자금(우) */}
+      {/* 헤더 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
         <div style={{ fontSize: 10, color: '#4b5563' }}>완료 거래 {completed.length}건 · 오래된 순</div>
         {principalNum !== undefined && (
@@ -144,27 +111,47 @@ const YearDetailInline: React.FC<{
 
       {/* 거래 목록 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {completed.map((t, i) => (
-          <div key={i} onClick={() => { if (t.stock_code) navigate(`/?code=${t.stock_code}`); }}
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderRadius: 7, cursor: t.stock_code ? 'pointer' : 'default', background: (t.return_pct ?? 0) >= 0 ? '#14532d10' : '#7f1d1d10', border: `1px solid ${pctColor(t.return_pct ?? 0)}22` }}
-            onMouseEnter={(e) => { if (t.stock_code) e.currentTarget.style.opacity = '0.75'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}>
-            <div>
-              <div style={{ fontSize: 11, color: '#d1d5db', fontWeight: 500, marginBottom: 3 }}>
-                {t.stock_name}<span style={{ fontSize: 9, color: '#374151', marginLeft: 6 }}>{t.stock_code}</span>
+        {completed.map((t, i) => {
+          const prevCash = hasCashFlow
+            ? (i === 0 ? principalNum! : (completed[i - 1].cash_after ?? principalNum!))
+            : null;
+          const gain = (t.cash_after != null && prevCash != null)
+            ? t.cash_after - prevCash
+            : null;
+          return (
+            <div key={i} onClick={() => { if (t.stock_code) navigate(`/?code=${t.stock_code}`); }}
+              style={{ borderRadius: 7, cursor: t.stock_code ? 'pointer' : 'default', background: (t.return_pct ?? 0) >= 0 ? '#14532d10' : '#7f1d1d10', border: `1px solid ${pctColor(t.return_pct ?? 0)}22`, overflow: 'hidden' }}
+              onMouseEnter={(e) => { if (t.stock_code) e.currentTarget.style.opacity = '0.75'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}>
+              {/* 거래 정보 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}>
+                <div>
+                  <div style={{ fontSize: 11, color: '#d1d5db', fontWeight: 500, marginBottom: 3 }}>
+                    {t.stock_name}<span style={{ fontSize: 9, color: '#374151', marginLeft: 6 }}>{t.stock_code}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, fontSize: 9, color: '#6b7280', flexWrap: 'wrap' }}>
+                    <span><span style={{ color: '#16a34a', fontWeight: 600 }}>B</span> {t.buy_date} · {fmtPrice(t.buy_price)}</span>
+                    <span style={{ color: '#374151' }}>→</span>
+                    <span><span style={{ color: '#dc2626', fontWeight: 600 }}>S</span> {t.sell_date} · {fmtPrice(t.sell_price ?? 0)}</span>
+                  </div>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>{pctStr(t.return_pct ?? 0)}</div>
               </div>
-              <div style={{ display: 'flex', gap: 6, fontSize: 9, color: '#6b7280', flexWrap: 'wrap' }}>
-                <span><span style={{ color: '#16a34a', fontWeight: 600 }}>B</span> {t.buy_date} · {fmtPrice(t.buy_price)}</span>
-                <span style={{ color: '#374151' }}>→</span>
-                <span><span style={{ color: '#dc2626', fontWeight: 600 }}>S</span> {t.sell_date} · {fmtPrice(t.sell_price ?? 0)}</span>
-                {t.cash_after != null && (
-                  <span style={{ color: '#4b5563' }}>· 잔액 {fmtKRW(t.cash_after)}원</span>
-                )}
-              </div>
+              {/* 잔액 흐름 한 줄 */}
+              {gain != null && t.cash_after != null && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px 6px', fontSize: 9, color: '#4b5563', borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18` }}>
+                  <span>{fmtKRW(prevCash!)}원</span>
+                  <span style={{ color: '#374151' }}>→</span>
+                  <span style={{ color: gain >= 0 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
+                    {gain >= 0 ? '+' : ''}{fmtKRW(gain)}원
+                  </span>
+                  <span style={{ color: '#374151' }}>=</span>
+                  <span style={{ color: '#d1d5db', fontWeight: 600 }}>{fmtKRW(t.cash_after)}원</span>
+                </div>
+              )}
             </div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>{pctStr(t.return_pct ?? 0)}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
