@@ -49,6 +49,8 @@ class TradeRecord(BaseModel):
     sell_price: Optional[float] = None
     return_pct: Optional[float] = None
     unrealized_pct: Optional[float] = None
+    cash_after: Optional[float] = None  # 해당 거래 청산 후 보유 현금 잔액
+
 
 
 class WinRateResult(BaseModel):
@@ -628,6 +630,7 @@ async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: da
                     stock_code=sc, stock_name=sc_name.get(sc, sc),
                     buy_date=info["buy_date"], buy_price=info["buy_price"],
                     sell_date=date_str, sell_price=close, return_pct=round(ret_pct, 2),
+                    cash_after=round(cash, 0),
                 ))
                 to_sell.append(sc)
 
@@ -688,6 +691,7 @@ async def _get_seo_simulation_year(db, model_id: str, since: datetime, until: da
                 stock_code=sc, stock_name=sc_name.get(sc, sc),
                 buy_date=info["buy_date"], buy_price=info["buy_price"],
                 sell_date=all_dates[-1], sell_price=close, return_pct=round(ret_pct, 2),
+                cash_after=round(cash, 0),
             ))
         portfolio.clear()
 

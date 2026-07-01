@@ -115,6 +115,10 @@ const YearDetailInline: React.FC<{
                 <span><span style={{ color: '#16a34a', fontWeight: 600 }}>B</span> {t.buy_date} · {fmtPrice(t.buy_price)}</span>
                 <span style={{ color: '#374151' }}>→</span>
                 <span><span style={{ color: '#dc2626', fontWeight: 600 }}>S</span> {t.sell_date} · {fmtPrice(t.sell_price ?? 0)}</span>
+                {t.cash_after != null && (
+                  <span style={{ color: '#4b5563' }}>· 잔액 {fmtKRW(t.cash_after)}원</span>
+                )}
+
               </div>
             </div>
             <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>{pctStr(t.return_pct ?? 0)}</div>
