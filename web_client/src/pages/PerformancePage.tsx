@@ -136,10 +136,16 @@ const YearDetailInline: React.FC<{
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>{pctStr(t.return_pct ?? 0)}</div>
               </div>
-              {/* 청산 후 현금 잔액만 표시 */}
-              {t.cash_after != null && (
-                <div style={{ padding: '3px 12px 6px', fontSize: 9, borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18`, color: '#4b5563' }}>
-                  현금 잔액 <span style={{ color: '#d1d5db', fontWeight: 600 }}>{fmtKRW(t.cash_after)}원</span>
+              {/* 매수금 · 손익 · 현금잔액 */}
+              {t.buy_total != null && t.cash_after != null && (
+                <div style={{ padding: '3px 12px 6px', fontSize: 9, borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18`, display: 'flex', gap: 8, color: '#4b5563' }}>
+                  <span>매수 <span style={{ color: '#6b7280', fontWeight: 600 }}>{fmtKRW(t.buy_total)}원</span></span>
+                  <span style={{ color: '#2d2d3d' }}>|</span>
+                  {(() => { const g = t.return_pct != null ? Math.round(t.buy_total * (t.return_pct / 100)) : null; return g != null ? (
+                    <span>손익 <span style={{ color: g >= 0 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>{g >= 0 ? '+' : ''}{fmtKRW(g)}원</span></span>
+                  ) : null; })()}
+                  <span style={{ color: '#2d2d3d' }}>|</span>
+                  <span>현금 <span style={{ color: '#d1d5db', fontWeight: 600 }}>{fmtKRW(t.cash_after)}원</span></span>
                 </div>
               )}
 
