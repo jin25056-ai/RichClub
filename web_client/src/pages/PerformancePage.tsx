@@ -489,7 +489,8 @@ const PerformancePage: React.FC = () => {
           <>
             <div style={{ background: '#0f0f1a', border: '1px solid #1e1e2e', borderRadius: 10, padding: '16px 20px', marginBottom: 14 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 12 }}>시뮬레이션 설정</div>
-              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'nowrap', overflowX: 'auto' }}>
+
                 <div>
                   <div style={{ fontSize: 9, color: '#4b5563', marginBottom: 5 }}>투자 원금</div>
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
