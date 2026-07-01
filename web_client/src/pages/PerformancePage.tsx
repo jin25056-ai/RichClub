@@ -112,12 +112,12 @@ const YearDetailInline: React.FC<{
       {/* 거래 목록 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         {completed.map((t, i) => {
-          const prevCash = hasCashFlow
-            ? (i === 0 ? principalNum! : (completed[i - 1].cash_after ?? principalNum!))
+          // gain: 수익률 × 종목당 투자금으로 직접 계산 (동시 보유로 cash 차이가 왜곡되므로)
+          const perStock = principalNum != null ? principalNum / maxStocks : null;
+          const gain = (t.return_pct != null && perStock != null)
+            ? Math.round(perStock * (t.return_pct / 100))
             : null;
-          const gain = (t.cash_after != null && prevCash != null)
-            ? t.cash_after - prevCash
-            : null;
+
           return (
             <div key={i} onClick={() => { if (t.stock_code) navigate(`/?code=${t.stock_code}`); }}
               style={{ borderRadius: 7, cursor: t.stock_code ? 'pointer' : 'default', background: (t.return_pct ?? 0) >= 0 ? '#14532d10' : '#7f1d1d10', border: `1px solid ${pctColor(t.return_pct ?? 0)}22`, overflow: 'hidden' }}
@@ -137,10 +137,10 @@ const YearDetailInline: React.FC<{
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>{pctStr(t.return_pct ?? 0)}</div>
               </div>
-              {/* 잔액 흐름 한 줄 */}
-              {gain != null && t.cash_after != null && (
+              {/* 잔액 흐름: 종목당투자금 → ±수익금 = 잔액 */}
+              {gain != null && t.cash_after != null && perStock != null && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px 6px', fontSize: 9, color: '#4b5563', borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18` }}>
-                  <span>{fmtKRW(prevCash!)}원</span>
+                  <span>{fmtKRW(perStock)}원</span>
                   <span style={{ color: '#374151' }}>→</span>
                   <span style={{ color: gain >= 0 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
                     {gain >= 0 ? '+' : ''}{fmtKRW(gain)}원
