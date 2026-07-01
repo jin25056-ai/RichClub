@@ -50,6 +50,9 @@ export interface TradeRecord {
   buy_date: string; buy_price: number;
   sell_date: string | null; sell_price: number | null;
   return_pct: number | null; unrealized_pct: number | null;
+  cash_after?: number | null;  // 청산 후 현금 잔액
+  buy_total?: number | null;   // 실제 투자금
+
   cash_after?: number | null;
 
 }

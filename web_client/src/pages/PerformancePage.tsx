@@ -39,7 +39,6 @@ function calcCumulative(returns: number[], mode: CalcMode): number {
   return parseFloat((returns.reduce((a, b) => a + b, 0) / returns.length).toFixed(2));
 }
 
-// 오래된 순 정렬
 const sortByDate = (trades: TradeRecord[]) =>
   [...trades].sort((a, b) => (a.sell_date ?? '').localeCompare(b.sell_date ?? ''));
 
@@ -77,14 +76,11 @@ const YearDetailInline: React.FC<{
   const detailMax = completedRets.length ? Math.max(...completedRets) : 0;
   const detailMin = completedRets.length ? Math.min(...completedRets) : 0;
 
-  const hasCashFlow = completed.some((t) => t.cash_after != null) && principalNum !== undefined;
-
   if (loading) return <div style={{ textAlign: 'center', padding: '30px 0', color: '#4b5563' }}>불러오는 중...</div>;
   if (!data) return <div style={{ textAlign: 'center', padding: '30px 0', color: '#4b5563' }}>데이터 없음</div>;
 
   return (
     <div style={{ marginTop: 12 }}>
-      {/* 요약 카드 3개 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
         {[
           { label: '승률', value: `${detailWinRate.toFixed(1)}%`, sub: `${detailWin}승 ${detailLose}패`, color: detailWinRate >= 50 ? '#16a34a' : '#dc2626' },
@@ -99,7 +95,6 @@ const YearDetailInline: React.FC<{
         ))}
       </div>
 
-      {/* 헤더 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
         <div style={{ fontSize: 10, color: '#4b5563' }}>완료 거래 {completed.length}건 · 오래된 순</div>
         {principalNum !== undefined && (
@@ -109,13 +104,12 @@ const YearDetailInline: React.FC<{
         )}
       </div>
 
-      {/* 거래 목록 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         {completed.map((t, i) => {
-          // gain: 수익률 × 종목당 투자금으로 직접 계산 (동시 보유로 cash 차이가 왜곡되므로)
-          const perStock = principalNum != null ? principalNum / maxStocks : null;
-          const gain = (t.return_pct != null && perStock != null)
-            ? Math.round(perStock * (t.return_pct / 100))
+          // buy_total: 실제 투자금 (동적 배분이므로 거래마다 다름)
+          const buyTotal = t.buy_total ?? null;
+          const gain = (t.return_pct != null && buyTotal != null)
+            ? Math.round(buyTotal * (t.return_pct / 100))
             : null;
 
           return (
@@ -123,7 +117,6 @@ const YearDetailInline: React.FC<{
               style={{ borderRadius: 7, cursor: t.stock_code ? 'pointer' : 'default', background: (t.return_pct ?? 0) >= 0 ? '#14532d10' : '#7f1d1d10', border: `1px solid ${pctColor(t.return_pct ?? 0)}22`, overflow: 'hidden' }}
               onMouseEnter={(e) => { if (t.stock_code) e.currentTarget.style.opacity = '0.75'; }}
               onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}>
-              {/* 거래 정보 */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}>
                 <div>
                   <div style={{ fontSize: 11, color: '#d1d5db', fontWeight: 500, marginBottom: 3 }}>
@@ -137,10 +130,10 @@ const YearDetailInline: React.FC<{
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: pctColor(t.return_pct ?? 0), flexShrink: 0, marginLeft: 12 }}>{pctStr(t.return_pct ?? 0)}</div>
               </div>
-              {/* 잔액 흐름: 종목당투자금 → ±수익금 = 잔액 */}
-              {gain != null && t.cash_after != null && perStock != null && (
+              {/* 실투자금 → ±수익금 = 잔액 */}
+              {gain != null && buyTotal != null && t.cash_after != null && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px 6px', fontSize: 9, color: '#4b5563', borderTop: `1px solid ${pctColor(t.return_pct ?? 0)}18` }}>
-                  <span>{fmtKRW(perStock)}원</span>
+                  <span>{fmtKRW(buyTotal)}원</span>
                   <span style={{ color: '#374151' }}>→</span>
                   <span style={{ color: gain >= 0 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
                     {gain >= 0 ? '+' : ''}{fmtKRW(gain)}원
@@ -157,7 +150,6 @@ const YearDetailInline: React.FC<{
   );
 };
 
-// 전체 연도 모드 상세보기 모달
 const YearDetailModal: React.FC<{ year: number; modelId: string; maxStocks: number; onClose: () => void }> = ({ year, modelId, maxStocks, onClose }) => {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 60, overflowY: 'auto' }} onClick={onClose}>
